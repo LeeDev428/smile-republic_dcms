@@ -2,6 +2,82 @@
 require_once '../includes/config.php';
 requireRole('frontdesk');
 
+// Include layout for rendering
+require_once 'layout.php';
+
+// AJAX endpoint for getting available time slots
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_available_slots') {
+    header('Content-Type: application/json');
+    
+    $dentist_id = intval($_GET['dentist_id'] ?? 0);
+    $appointment_date = $_GET['appointment_date'] ?? '';
+    
+    if (!$dentist_id || !$appointment_date) {
+        echo json_encode(['error' => 'Missing parameters']);
+        exit;
+    }
+    
+    try {
+        // Get booked appointments with their durations for this dentist on this date
+        $stmt = $pdo->prepare("
+            SELECT a.appointment_time, a.duration_minutes
+            FROM appointments a
+            WHERE a.dentist_id = ? AND a.appointment_date = ? 
+            AND a.status NOT IN ('cancelled', 'no_show')
+        ");
+        $stmt->execute([$dentist_id, $appointment_date]);
+        $booked_appointments = $stmt->fetchAll();
+        
+        // Generate all possible time slots (8:00 AM to 6:00 PM in 15-minute intervals)
+        $all_slots = [];
+        $start_hour = 8;
+        $end_hour = 18;
+        
+        for ($hour = $start_hour; $hour < $end_hour; $hour++) {
+            for ($minute = 0; $minute < 60; $minute += 15) {
+                $time_string = sprintf('%02d:%02d:00', $hour, $minute);
+                $all_slots[] = $time_string;
+            }
+        }
+        
+        // Calculate blocked slots based on appointment duration
+        $blocked_slots = [];
+        foreach ($booked_appointments as $appointment) {
+            $start_time = $appointment['appointment_time'];
+            $duration = intval($appointment['duration_minutes']);
+            
+            // Convert start time to minutes since midnight
+            $time_parts = explode(':', $start_time);
+            $start_minutes = ($time_parts[0] * 60) + $time_parts[1];
+            
+            // Calculate how many 15-minute slots this appointment blocks
+            $slots_needed = ceil($duration / 15);
+            
+            // Block consecutive slots
+            for ($i = 0; $i < $slots_needed; $i++) {
+                $slot_minutes = $start_minutes + ($i * 15);
+                $slot_hour = floor($slot_minutes / 60);
+                $slot_minute = $slot_minutes % 60;
+                
+                // Only block slots within business hours
+                if ($slot_hour >= 8 && $slot_hour < 18) {
+                    $blocked_slot = sprintf('%02d:%02d:00', $slot_hour, $slot_minute);
+                    $blocked_slots[] = $blocked_slot;
+                }
+            }
+        }
+        
+        // Remove blocked slots from available slots
+        $available_slots = array_diff($all_slots, $blocked_slots);
+        
+        echo json_encode(['available_slots' => array_values($available_slots)]);
+        exit;
+    } catch (PDOException $e) {
+        echo json_encode(['error' => 'Database error']);
+        exit;
+    }
+}
+
 $message = '';
 $error = '';
 
@@ -26,19 +102,37 @@ if ($_POST) {
             if (!$operation) {
                 $error = 'Invalid operation selected.';
             } else {
-                // Check if time slot is available
+                // Check if time slot is available considering duration
                 $stmt = $pdo->prepare("
-                    SELECT COUNT(*) as count 
-                    FROM appointments 
-                    WHERE dentist_id = ? AND appointment_date = ? 
-                    AND appointment_time = ? 
-                    AND status NOT IN ('cancelled', 'no_show')
+                    SELECT a.appointment_time, a.duration_minutes
+                    FROM appointments a
+                    WHERE a.dentist_id = ? AND a.appointment_date = ? 
+                    AND a.status NOT IN ('cancelled', 'no_show')
                 ");
-                $stmt->execute([$dentist_id, $appointment_date, $appointment_time]);
-                $existing = $stmt->fetch();
+                $stmt->execute([$dentist_id, $appointment_date]);
+                $existing_appointments = $stmt->fetchAll();
                 
-                if ($existing['count'] > 0) {
-                    $error = 'This time slot is already booked. Please choose another time.';
+                // Convert appointment time to minutes
+                $time_parts = explode(':', $appointment_time);
+                $new_start_minutes = ($time_parts[0] * 60) + $time_parts[1];
+                $new_duration = intval($operation['duration_minutes']);
+                $new_end_minutes = $new_start_minutes + $new_duration;
+                
+                $conflict = false;
+                foreach ($existing_appointments as $existing) {
+                    $existing_time_parts = explode(':', $existing['appointment_time']);
+                    $existing_start_minutes = ($existing_time_parts[0] * 60) + $existing_time_parts[1];
+                    $existing_end_minutes = $existing_start_minutes + intval($existing['duration_minutes']);
+                    
+                    // Check for time overlap
+                    if (($new_start_minutes < $existing_end_minutes) && ($new_end_minutes > $existing_start_minutes)) {
+                        $conflict = true;
+                        break;
+                    }
+                }
+                
+                if ($conflict) {
+                    $error = 'This time slot conflicts with an existing appointment. Please choose another time.';
                 } else {
                     // Create appointment
                     $stmt = $pdo->prepare("
@@ -89,76 +183,10 @@ try {
 } catch (PDOException $e) {
     $operations = [];
 }
-?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Schedule Appointment - Smile Republic Dental Clinic</title>
-    <link rel="stylesheet" href="../assets/css/style.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-</head>
-<body>
-    <div class="dashboard-container">
-        <!-- Sidebar -->
-        <aside class="sidebar">
-            <div class="sidebar-header">
-                <a href="#" class="logo">
-                    <i class="fas fa-tooth"></i>
-                    <span>Smile Republic</span>
-                </a>
-                <div style="margin-top: 1rem; padding: 0.75rem; background: var(--gray-100); border-radius: var(--border-radius); text-align: center;">
-                    <div style="font-weight: 600; color: var(--warning-color); font-size: 0.875rem;">Front Desk</div>
-                    <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
-                        <?php echo htmlspecialchars($_SESSION['first_name'] . ' ' . $_SESSION['last_name']); ?>
-                    </div>
-                </div>
-            </div>
-            
-            <nav class="sidebar-nav">
-                <a href="dashboard.php">
-                    <i class="fas fa-tachometer-alt"></i>
-                    Dashboard
-                </a>
-                <a href="appointments.php">
-                    <i class="fas fa-calendar-alt"></i>
-                    Appointments
-                </a>
-                <a href="schedule.php" class="active">
-                    <i class="fas fa-calendar-check"></i>
-                    Schedule Appointment
-                </a>
-                <a href="patients.php">
-                    <i class="fas fa-users"></i>
-                    Patients
-                </a>
-                <a href="patient-registration.php">
-                    <i class="fas fa-user-plus"></i>
-                    Register Patient
-                </a>
-                <a href="check-in.php">
-                    <i class="fas fa-check-circle"></i>
-                    Patient Check-in
-                </a>
-                <a href="payments.php">
-                    <i class="fas fa-credit-card"></i>
-                    Payments
-                </a>
-                <div style="border-top: 1px solid var(--border-color); margin: 1rem 0; padding-top: 1rem;">
-                    <a href="../logout.php" style="color: var(--danger-color);">
-                        <i class="fas fa-sign-out-alt"></i>
-                        Logout
-                    </a>
-                </div>
-            </nav>
-        </aside>
 
-        <!-- Main Content -->
-        <main class="main-content">
+function renderPageContent() {
+    global $message, $error, $patients, $dentists, $operations;
+?>
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <div>
                     <h1 style="margin-bottom: 0.5rem;">Schedule Appointment</h1>
@@ -196,18 +224,25 @@ try {
                     <div class="card-body">
                         <form method="POST" id="appointmentForm">
                             <div class="form-group">
-                                <label for="patient_id" class="form-label">
+                                <label for="patient_search" class="form-label">
                                     <i class="fas fa-user"></i>
                                     Patient *
                                 </label>
-                                <select id="patient_id" name="patient_id" class="form-control form-select" required onchange="loadPatientInfo()">
-                                    <option value="">Select Patient</option>
-                                    <?php foreach ($patients as $patient): ?>
-                                        <option value="<?php echo $patient['id']; ?>" data-phone="<?php echo htmlspecialchars($patient['phone']); ?>">
-                                            <?php echo htmlspecialchars($patient['first_name'] . ' ' . $patient['last_name']); ?>
-                                        </option>
-                                    <?php endforeach; ?>
-                                </select>
+                                <div style="position: relative;">
+                                    <input type="text" id="patient_search" name="patient_search" class="form-control" 
+                                           placeholder="Type to search patients..." 
+                                           autocomplete="off" 
+                                           onkeyup="searchPatients()" 
+                                           onfocus="showPatientDropdown()" 
+                                           required>
+                                    <input type="hidden" id="patient_id" name="patient_id" required>
+                                    <div id="patient_dropdown" style="position: absolute; top: 100%; left: 0; right: 0; 
+                                                                      background: var(--white); border: 2px solid var(--border-color); 
+                                                                      border-top: none; border-radius: 0 0 var(--border-radius) var(--border-radius); 
+                                                                      max-height: 200px; overflow-y: auto; z-index: 1000; display: none;">
+                                        <!-- Patient options will be populated here -->
+                                    </div>
+                                </div>
                                 <div id="patientInfo" style="margin-top: 0.5rem; font-size: 0.875rem; color: var(--text-muted);"></div>
                             </div>
 
@@ -344,18 +379,120 @@ try {
     </div>
 
     <script>
-        function loadPatientInfo() {
-            const select = document.getElementById('patient_id');
-            const info = document.getElementById('patientInfo');
-            const selectedOption = select.options[select.selectedIndex];
+        // Patient data for search functionality
+        const patients = <?php echo json_encode($patients); ?>;
+        
+        function searchPatients() {
+            const searchTerm = document.getElementById('patient_search').value.toLowerCase();
+            const dropdown = document.getElementById('patient_dropdown');
             
-            if (selectedOption.value) {
-                const phone = selectedOption.getAttribute('data-phone');
-                info.innerHTML = `<i class="fas fa-phone"></i> ${phone}`;
+            if (searchTerm.length === 0) {
+                dropdown.style.display = 'none';
+                document.getElementById('patient_id').value = '';
+                document.getElementById('patientInfo').innerHTML = '';
+                return;
+            }
+            
+            // Filter patients based on search term
+            const filteredPatients = patients.filter(patient => {
+                const fullName = (patient.first_name + ' ' + patient.last_name).toLowerCase();
+                return fullName.includes(searchTerm);
+            });
+            
+            // Show dropdown with filtered results
+            if (filteredPatients.length > 0) {
+                let dropdownHTML = '';
+                filteredPatients.forEach(patient => {
+                    const fullName = patient.first_name + ' ' + patient.last_name;
+                    const phone = patient.phone ? ` - ${patient.phone}` : '';
+                    dropdownHTML += `
+                        <div class="patient-option" 
+                             onclick="selectPatient(${patient.id}, '${fullName.replace(/'/g, "\\'")}', '${patient.phone || ''}')"
+                             style="padding: 0.75rem; cursor: pointer; border-bottom: 1px solid var(--gray-200); 
+                                    transition: var(--transition);"
+                             onmouseover="this.style.backgroundColor='var(--gray-100)'"
+                             onmouseout="this.style.backgroundColor='var(--white)'">
+                            <div style="font-weight: 500;">${fullName}</div>
+                            ${phone ? `<small style="color: var(--text-muted);">${patient.phone}</small>` : ''}
+                        </div>
+                    `;
+                });
+                
+                dropdown.innerHTML = dropdownHTML;
+                dropdown.style.display = 'block';
             } else {
-                info.innerHTML = '';
+                dropdown.innerHTML = `
+                    <div style="padding: 1rem; text-align: center; color: var(--text-muted);">
+                        <i class="fas fa-search"></i> No patients found
+                        <br><small>Try a different search term</small>
+                    </div>
+                `;
+                dropdown.style.display = 'block';
             }
         }
+        
+        function showPatientDropdown() {
+            const searchTerm = document.getElementById('patient_search').value;
+            if (searchTerm.length === 0) {
+                // Show all patients when focused
+                const dropdown = document.getElementById('patient_dropdown');
+                let dropdownHTML = '';
+                patients.forEach(patient => {
+                    const fullName = patient.first_name + ' ' + patient.last_name;
+                    const phone = patient.phone ? ` - ${patient.phone}` : '';
+                    dropdownHTML += `
+                        <div class="patient-option" 
+                             onclick="selectPatient(${patient.id}, '${fullName.replace(/'/g, "\\'")}', '${patient.phone || ''}')"
+                             style="padding: 0.75rem; cursor: pointer; border-bottom: 1px solid var(--gray-200); 
+                                    transition: var(--transition);"
+                             onmouseover="this.style.backgroundColor='var(--gray-100)'"
+                             onmouseout="this.style.backgroundColor='var(--white)'">
+                            <div style="font-weight: 500;">${fullName}</div>
+                            ${phone ? `<small style="color: var(--text-muted);">${patient.phone}</small>` : ''}
+                        </div>
+                    `;
+                });
+                
+                dropdown.innerHTML = dropdownHTML;
+                dropdown.style.display = 'block';
+            }
+        }
+        
+        function selectPatient(patientId, patientName, patientPhone) {
+            document.getElementById('patient_search').value = patientName;
+            document.getElementById('patient_id').value = patientId;
+            document.getElementById('patient_dropdown').style.display = 'none';
+            
+            // Show patient info
+            const info = document.getElementById('patientInfo');
+            if (patientPhone) {
+                info.innerHTML = `<i class="fas fa-phone"></i> ${patientPhone}`;
+            } else {
+                info.innerHTML = '<i class="fas fa-check"></i> Patient selected';
+            }
+            
+            // Update field styling to show it's valid
+            document.getElementById('patient_search').style.borderColor = 'var(--success-color)';
+        }
+        
+        // Hide dropdown when clicking outside
+        document.addEventListener('click', function(event) {
+            const searchField = document.getElementById('patient_search');
+            const dropdown = document.getElementById('patient_dropdown');
+            
+            if (!searchField.contains(event.target) && !dropdown.contains(event.target)) {
+                dropdown.style.display = 'none';
+            }
+        });
+        
+        // Reset patient selection when input changes manually
+        document.getElementById('patient_search').addEventListener('input', function() {
+            if (this.value !== document.querySelector('#patient_dropdown .patient-option')?.textContent?.trim()) {
+                document.getElementById('patient_id').value = '';
+                document.getElementById('patientInfo').innerHTML = '';
+                this.style.borderColor = 'var(--border-color)';
+            }
+        });
 
         function updateOperationInfo() {
             const select = document.getElementById('operation_id');
@@ -365,7 +502,7 @@ try {
             if (selectedOption.value) {
                 const price = selectedOption.getAttribute('data-price');
                 const duration = selectedOption.getAttribute('data-duration');
-                info.innerHTML = `<i class="fas fa-dollar-sign"></i> $${price} | <i class="fas fa-clock"></i> ${duration} minutes`;
+                info.innerHTML = `<i class="fas fa-peso-sign"></i> ₱${price} | <i class="fas fa-clock"></i> ${duration} minutes`;
             } else {
                 info.innerHTML = '';
             }
@@ -388,48 +525,81 @@ try {
                 return;
             }
 
-            // Generate time slots (8:00 AM to 6:00 PM in 15-minute intervals)
-            const slots = [];
-            const startHour = 8;
-            const endHour = 18;
-            
-            for (let hour = startHour; hour < endHour; hour++) {
-                for (let minute = 0; minute < 60; minute += 15) {
-                    const timeString = String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0');
-                    const displayTime = formatTime12Hour(hour, minute);
-                    slots.push({ value: timeString, display: displayTime });
-                }
-            }
-
-            // Update time select
-            timeSelect.innerHTML = '<option value="">Select Time</option>';
-            slots.forEach(slot => {
-                const option = document.createElement('option');
-                option.value = slot.value;
-                option.textContent = slot.display;
-                timeSelect.appendChild(option);
-            });
-
-            // Update preview
-            let previewHTML = `
-                <div style="margin-bottom: 1rem;">
-                    <strong>Available slots for ${appointmentDate}</strong>
+            // Show loading
+            preview.innerHTML = `
+                <div style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                    <i class="fas fa-spinner fa-spin" style="font-size: 2rem; margin-bottom: 1rem;"></i>
+                    <p>Loading available time slots...</p>
                 </div>
-                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 0.5rem;">
             `;
-            
-            slots.forEach(slot => {
-                previewHTML += `
-                    <button type="button" class="time-slot-btn" onclick="selectTimeSlot('${slot.value}')"
-                            style="padding: 0.5rem; border: 1px solid var(--border-color); border-radius: var(--border-radius); 
-                                   background: var(--white); cursor: pointer; font-size: 0.875rem; transition: var(--transition);">
-                        ${slot.display}
-                    </button>
-                `;
-            });
-            
-            previewHTML += '</div>';
-            preview.innerHTML = previewHTML;
+
+            // Fetch available slots from server
+            fetch(`schedule.php?ajax=get_available_slots&dentist_id=${dentistId}&appointment_date=${appointmentDate}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        preview.innerHTML = `
+                            <div style="text-align: center; padding: 2rem; color: var(--danger-color);">
+                                <i class="fas fa-exclamation-triangle" style="font-size: 2rem; margin-bottom: 1rem;"></i>
+                                <p>Error loading time slots</p>
+                            </div>
+                        `;
+                        return;
+                    }
+                    
+                    const availableSlots = data.available_slots;
+                    
+                    // Update time select
+                    timeSelect.innerHTML = '<option value="">Select Time</option>';
+                    availableSlots.forEach(slot => {
+                        const option = document.createElement('option');
+                        option.value = slot;
+                        option.textContent = formatTime(slot);
+                        timeSelect.appendChild(option);
+                    });
+
+                    // Update preview
+                    if (availableSlots.length === 0) {
+                        preview.innerHTML = `
+                            <div style="text-align: center; padding: 2rem; color: var(--warning-color);">
+                                <i class="fas fa-calendar-times" style="font-size: 2rem; margin-bottom: 1rem;"></i>
+                                <p>No available time slots for this date</p>
+                                <small>All slots are booked for this dentist</small>
+                            </div>
+                        `;
+                    } else {
+                        let previewHTML = `
+                            <div style="margin-bottom: 1rem;">
+                                <strong>Available slots for ${appointmentDate}</strong>
+                                <small style="display: block; color: var(--text-muted);">${availableSlots.length} slots available</small>
+                            </div>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 0.5rem;">
+                        `;
+                        
+                        availableSlots.forEach(slot => {
+                            previewHTML += `
+                                <button type="button" class="time-slot-btn" onclick="selectTimeSlot('${slot}')"
+                                        style="padding: 0.75rem 0.5rem; border: 2px solid var(--border-color); border-radius: var(--border-radius); 
+                                               background: var(--white); cursor: pointer; font-size: 0.875rem; transition: var(--transition);
+                                               font-weight: 500;">
+                                    ${formatTime(slot)}
+                                </button>
+                            `;
+                        });
+                        
+                        previewHTML += '</div>';
+                        preview.innerHTML = previewHTML;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching available slots:', error);
+                    preview.innerHTML = `
+                        <div style="text-align: center; padding: 2rem; color: var(--danger-color);">
+                            <i class="fas fa-exclamation-triangle" style="font-size: 2rem; margin-bottom: 1rem;"></i>
+                            <p>Error loading time slots</p>
+                        </div>
+                    `;
+                });
         }
 
         function selectTimeSlot(time) {
@@ -447,7 +617,8 @@ try {
             event.target.style.color = 'var(--white)';
         }
 
-        function formatTime12Hour(hour, minute) {
+        function formatTime(timeString) {
+            const [hour, minute] = timeString.split(':').map(Number);
             const period = hour >= 12 ? 'PM' : 'AM';
             const displayHour = hour > 12 ? hour - 12 : (hour === 0 ? 12 : hour);
             return `${displayHour}:${String(minute).padStart(2, '0')} ${period}`;
@@ -478,5 +649,12 @@ try {
         // Set minimum date to today
         document.getElementById('appointment_date').min = new Date().toISOString().split('T')[0];
     </script>
-</body>
-</html>
+<?php
+}
+
+ob_start();
+renderPageContent();
+$pageContent = ob_get_clean();
+
+renderFrontdeskLayout('Schedule Appointment', $pageContent, 'schedule.php');
+?>

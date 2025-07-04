@@ -6,8 +6,8 @@
 }
 
 :root {
-    --primary-color: #1e40af;
-    --primary-hover: #1d4ed8;
+    --primary-color: #5194c1;
+    --primary-hover: #1a638e;
     --secondary-color: #3b82f6;
     --accent-color: #60a5fa;
     --success-color: #10b981;
@@ -287,6 +287,7 @@ p {
     color: var(--white);
     border-color: var(--danger-color);
 }
+
 
 .btn-sm {
     padding: 0.5rem 1rem;
