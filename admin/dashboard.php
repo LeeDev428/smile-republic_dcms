@@ -44,8 +44,28 @@ try {
     $stmt = $pdo->query("SELECT COUNT(*) as total FROM dental_operations WHERE status = 'active'");
     $total_operations = $stmt->fetch()['total'];
     
+    // Get dentist statistics
+    $stmt = $pdo->query("
+        SELECT 
+            COUNT(*) as total_dentists,
+            COUNT(CASE WHEN u.status = 'active' THEN 1 END) as active_dentists,
+            COUNT(CASE WHEN u.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 END) as new_dentists_30d,
+            AVG(dp.years_of_experience) as avg_experience
+        FROM users u
+        LEFT JOIN dentist_profiles dp ON u.id = dp.user_id
+        WHERE u.role = 'dentist'
+    ");
+    $dentist_stats = $stmt->fetch();
+    
 } catch (PDOException $e) {
     $error = "Error loading dashboard data: " . $e->getMessage();
+    $total_users = 0;
+    $total_patients = 0;
+    $today_appointments = 0;
+    $monthly_revenue = 0;
+    $recent_appointments = [];
+    $total_operations = 0;
+    $dentist_stats = ['total_dentists' => 0, 'active_dentists' => 0, 'new_dentists_30d' => 0, 'avg_experience' => 0];
 }
 ?>
 <?php
@@ -53,7 +73,7 @@ require_once 'layout.php';
 
 function renderPageContent() {
     global $total_users, $total_patients, $today_appointments, $monthly_revenue, 
-           $recent_appointments, $total_operations, $error;
+           $recent_appointments, $total_operations, $dentist_stats, $error;
 ?>
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <div>
@@ -118,6 +138,73 @@ function renderPageContent() {
                         </div>
                         <div style="font-size: 2rem; color: var(--success-color); opacity: 0.7;">
                             <i class="fas fa-peso-sign"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dentist Statistics -->
+            <div class="row g-4 mb-4">
+                <div class="col-xl-3 col-md-6">
+                    <div class="card stat-card border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="d-flex align-items-center">
+                                <div class="stat-icon-modern bg-primary text-white rounded-3 me-3" style="width: 60px; height: 60px; display: flex; align-items: center; justify-content: center;">
+                                    <i class="fas fa-user-md fa-lg"></i>
+                                </div>
+                                <div>
+                                    <h3 class="mb-1 fw-bold text-primary"><?php echo $dentist_stats['total_dentists'] ?? 0; ?></h3>
+                                    <p class="text-muted mb-0 small">Total Dentists</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-xl-3 col-md-6">
+                    <div class="card stat-card border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="d-flex align-items-center">
+                                <div class="stat-icon-modern bg-success text-white rounded-3 me-3" style="width: 60px; height: 60px; display: flex; align-items: center; justify-content: center;">
+                                    <i class="fas fa-check-circle fa-lg"></i>
+                                </div>
+                                <div>
+                                    <h3 class="mb-1 fw-bold text-success"><?php echo $dentist_stats['active_dentists'] ?? 0; ?></h3>
+                                    <p class="text-muted mb-0 small">Active Dentists</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-xl-3 col-md-6">
+                    <div class="card stat-card border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="d-flex align-items-center">
+                                <div class="stat-icon-modern bg-info text-white rounded-3 me-3" style="width: 60px; height: 60px; display: flex; align-items: center; justify-content: center;">
+                                    <i class="fas fa-graduation-cap fa-lg"></i>
+                                </div>
+                                <div>
+                                    <h3 class="mb-1 fw-bold text-info"><?php echo round($dentist_stats['avg_experience'] ?? 0); ?></h3>
+                                    <p class="text-muted mb-0 small">Avg Years Experience</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-xl-3 col-md-6">
+                    <div class="card stat-card border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="d-flex align-items-center">
+                                <div class="stat-icon-modern bg-warning text-white rounded-3 me-3" style="width: 60px; height: 60px; display: flex; align-items: center; justify-content: center;">
+                                    <i class="fas fa-user-plus fa-lg"></i>
+                                </div>
+                                <div>
+                                    <h3 class="mb-1 fw-bold text-warning"><?php echo $dentist_stats['new_dentists_30d'] ?? 0; ?></h3>
+                                    <p class="text-muted mb-0 small">New This Month</p>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -251,6 +338,27 @@ function renderPageContent() {
             .badge-warning { background-color: var(--warning-color); }
             .badge-danger { background-color: var(--danger-color); }
             .badge-secondary { background-color: var(--gray-500); }
+            
+            .stat-card {
+                border: none;
+                border-radius: 15px;
+                padding: 0;
+                transition: all 0.3s ease;
+                background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.3));
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255,255,255,0.2);
+            }
+            
+            .stat-card:hover {
+                transform: translateY(-5px);
+                box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            }
+            
+            .stat-icon-modern {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                border-radius: 15px;
+                transition: all 0.3s ease;
+            }
         `;
         document.head.appendChild(style);
     </script>

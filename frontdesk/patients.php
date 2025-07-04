@@ -27,12 +27,12 @@ if ($search) {
 }
 
 if ($filter_age_min) {
-    $conditions[] = "age >= ?";
+    $conditions[] = "TIMESTAMPDIFF(YEAR, date_of_birth, CURDATE()) >= ?";
     $params[] = intval($filter_age_min);
 }
 
 if ($filter_age_max) {
-    $conditions[] = "age <= ?";
+    $conditions[] = "TIMESTAMPDIFF(YEAR, date_of_birth, CURDATE()) <= ?";
     $params[] = intval($filter_age_max);
 }
 
@@ -42,6 +42,7 @@ try {
     // Get patients with filters
     $stmt = $pdo->prepare("
         SELECT p.*, 
+               TIMESTAMPDIFF(YEAR, p.date_of_birth, CURDATE()) as calculated_age,
                COUNT(a.id) as appointment_count,
                MAX(a.appointment_date) as last_appointment_date
         FROM patients p
@@ -193,10 +194,9 @@ function renderPageContent() {
                                                 <div style="font-size: 0.875rem; color: var(--text-muted);">
                                                     ID: #<?php echo $patient['id']; ?>
                                                 </div>
-                                            </td>
-                                            <td>
-                                                <span class="badge badge-secondary"><?php echo $patient['age'] ?? 'N/A'; ?> years</span>
-                                            </td>
+                                            </td>                            <td>
+                                <span class="badge badge-secondary"><?php echo $patient['calculated_age'] ?? 'N/A'; ?> years</span>
+                            </td>
                                             <td>
                                                 <div style="font-size: 0.875rem;">
                                                     <?php if ($patient['phone']): ?>
@@ -215,19 +215,18 @@ function renderPageContent() {
                                                         <span style="color: var(--text-muted); font-style: italic;">No address</span>
                                                     <?php endif; ?>
                                                 </div>
-                                            </td>
-                                            <td>
-                                                <div style="font-size: 0.875rem;">
-                                                    <?php if ($patient['emergency_contact']): ?>
-                                                        <?php echo htmlspecialchars($patient['emergency_contact']); ?>
-                                                        <?php if ($patient['emergency_phone']): ?>
-                                                            <br><i class="fas fa-phone"></i> <?php echo htmlspecialchars($patient['emergency_phone']); ?>
-                                                        <?php endif; ?>
-                                                    <?php else: ?>
-                                                        <span style="color: var(--text-muted); font-style: italic;">None provided</span>
-                                                    <?php endif; ?>
-                                                </div>
-                                            </td>
+                                            </td>                            <td>
+                                <div style="font-size: 0.875rem;">
+                                    <?php if ($patient['emergency_contact_name']): ?>
+                                        <?php echo htmlspecialchars($patient['emergency_contact_name']); ?>
+                                        <?php if ($patient['emergency_contact_phone']): ?>
+                                            <br><i class="fas fa-phone"></i> <?php echo htmlspecialchars($patient['emergency_contact_phone']); ?>
+                                        <?php endif; ?>
+                                    <?php else: ?>
+                                        <span style="color: var(--text-muted); font-style: italic;">None provided</span>
+                                    <?php endif; ?>
+                                </div>
+                            </td>
                                             <td>
                                                 <div class="text-center">
                                                     <div style="font-weight: 600; font-size: 1.2rem;"><?php echo $patient['appointment_count']; ?></div>

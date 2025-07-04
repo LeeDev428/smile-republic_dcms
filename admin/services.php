@@ -180,7 +180,7 @@ function renderPageContent() {
                         <i class="fas fa-clock"></i>
                     </div>
                     <div>
-                        <div class="stat-value"><?php echo round($stats['avg_duration']); ?> min</div>
+                        <div class="stat-value"><?php echo $stats['avg_duration'] ? round($stats['avg_duration']) : 0; ?> min</div>
                         <div class="stat-label">Average Duration</div>
                     </div>
                 </div>

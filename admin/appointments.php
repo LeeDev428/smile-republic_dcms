@@ -15,7 +15,7 @@ if ($_POST && isset($_POST['action'])) {
     
     if ($action === 'update_status') {
         $new_status = $_POST['status'];
-        $valid_statuses = ['scheduled', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no_show'];
+        $valid_statuses = ['pending', 'confirmed', 'completed', 'cancelled', 'no_show'];
         
         if (in_array($new_status, $valid_statuses)) {
             try {

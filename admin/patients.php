@@ -18,17 +18,20 @@ if ($_POST && isset($_POST['action'])) {
         $phone = sanitize($_POST['phone']);
         $email = sanitize($_POST['email']);
         $address = sanitize($_POST['address']);
-        $age = intval($_POST['age']);
-        $emergency_contact = sanitize($_POST['emergency_contact']);
-        $emergency_phone = sanitize($_POST['emergency_phone']);
+        $date_of_birth = $_POST['date_of_birth'] ? $_POST['date_of_birth'] : null;
+        $gender = sanitize($_POST['gender']);
+        $emergency_contact_name = sanitize($_POST['emergency_contact_name']);
+        $emergency_contact_phone = sanitize($_POST['emergency_contact_phone']);
         $medical_history = sanitize($_POST['medical_history']);
+        $allergies = sanitize($_POST['allergies']);
+        $insurance_info = sanitize($_POST['insurance_info']);
         
         try {
             $stmt = $pdo->prepare("
-                INSERT INTO patients (first_name, last_name, phone, email, address, age, emergency_contact, emergency_phone, medical_history, created_at) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                INSERT INTO patients (first_name, last_name, phone, email, address, date_of_birth, gender, emergency_contact_name, emergency_contact_phone, medical_history, allergies, insurance_info, created_at) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
             ");
-            $stmt->execute([$first_name, $last_name, $phone, $email, $address, $age, $emergency_contact, $emergency_phone, $medical_history]);
+            $stmt->execute([$first_name, $last_name, $phone, $email, $address, $date_of_birth, $gender, $emergency_contact_name, $emergency_contact_phone, $medical_history, $allergies, $insurance_info]);
             $message = "Patient added successfully.";
         } catch (PDOException $e) {
             $error = "Error adding patient: " . $e->getMessage();
@@ -40,19 +43,22 @@ if ($_POST && isset($_POST['action'])) {
         $phone = sanitize($_POST['phone']);
         $email = sanitize($_POST['email']);
         $address = sanitize($_POST['address']);
-        $age = intval($_POST['age']);
-        $emergency_contact = sanitize($_POST['emergency_contact']);
-        $emergency_phone = sanitize($_POST['emergency_phone']);
+        $date_of_birth = $_POST['date_of_birth'] ? $_POST['date_of_birth'] : null;
+        $gender = sanitize($_POST['gender']);
+        $emergency_contact_name = sanitize($_POST['emergency_contact_name']);
+        $emergency_contact_phone = sanitize($_POST['emergency_contact_phone']);
         $medical_history = sanitize($_POST['medical_history']);
+        $allergies = sanitize($_POST['allergies']);
+        $insurance_info = sanitize($_POST['insurance_info']);
         
         try {
             $stmt = $pdo->prepare("
                 UPDATE patients 
-                SET first_name = ?, last_name = ?, phone = ?, email = ?, address = ?, age = ?, 
-                    emergency_contact = ?, emergency_phone = ?, medical_history = ?, updated_at = NOW()
+                SET first_name = ?, last_name = ?, phone = ?, email = ?, address = ?, date_of_birth = ?, gender = ?,
+                    emergency_contact_name = ?, emergency_contact_phone = ?, medical_history = ?, allergies = ?, insurance_info = ?, updated_at = NOW()
                 WHERE id = ?
             ");
-            $stmt->execute([$first_name, $last_name, $phone, $email, $address, $age, $emergency_contact, $emergency_phone, $medical_history, $patient_id]);
+            $stmt->execute([$first_name, $last_name, $phone, $email, $address, $date_of_birth, $gender, $emergency_contact_name, $emergency_contact_phone, $medical_history, $allergies, $insurance_info, $patient_id]);
             $message = "Patient updated successfully.";
         } catch (PDOException $e) {
             $error = "Error updating patient: " . $e->getMessage();
@@ -98,12 +104,12 @@ if ($search) {
 }
 
 if ($filter_age_min) {
-    $conditions[] = "age >= ?";
+    $conditions[] = "TIMESTAMPDIFF(YEAR, date_of_birth, CURDATE()) >= ?";
     $params[] = intval($filter_age_min);
 }
 
 if ($filter_age_max) {
-    $conditions[] = "age <= ?";
+    $conditions[] = "TIMESTAMPDIFF(YEAR, date_of_birth, CURDATE()) <= ?";
     $params[] = intval($filter_age_max);
 }
 
@@ -113,9 +119,9 @@ try {
     // Get patients with appointment counts
     $stmt = $pdo->prepare("
         SELECT p.*, 
+               TIMESTAMPDIFF(YEAR, p.date_of_birth, CURDATE()) as calculated_age,
                COUNT(a.id) as appointment_count,
-               MAX(a.appointment_date) as last_appointment_date,
-               SUM(CASE WHEN a.payment_status = 'pending' THEN 1 ELSE 0 END) as pending_payments
+               MAX(a.appointment_date) as last_appointment_date
         FROM patients p
         LEFT JOIN appointments a ON p.id = a.patient_id
         $where_clause
@@ -129,10 +135,10 @@ try {
     $stmt = $pdo->query("
         SELECT 
             COUNT(*) as total_patients,
-            AVG(age) as avg_age,
+            AVG(TIMESTAMPDIFF(YEAR, date_of_birth, CURDATE())) as avg_age,
             COUNT(CASE WHEN created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 END) as new_patients_30d
         FROM patients 
-        WHERE age IS NOT NULL
+        WHERE date_of_birth IS NOT NULL
     ");
     $stats = $stmt->fetch();
     
@@ -193,7 +199,7 @@ function renderPageContent() {
                         <i class="fas fa-birthday-cake"></i>
                     </div>
                     <div>
-                        <div class="stat-value"><?php echo round($stats['avg_age']); ?></div>
+                        <div class="stat-value"><?php echo $stats['avg_age'] ? round($stats['avg_age']) : 0; ?></div>
                         <div class="stat-label">Average Age</div>
                     </div>
                 </div>
@@ -295,27 +301,21 @@ function renderPageContent() {
                                                 <?php if ($patient['email']): ?>
                                                     <div style="font-size: 0.875rem; color: var(--text-muted);"><?php echo htmlspecialchars($patient['email']); ?></div>
                                                 <?php endif; ?>
-                                            </td>
-                                            <td>
-                                                <span class="badge badge-info"><?php echo $patient['age'] ?? 'N/A'; ?></span>
-                                            </td>
+                                            </td>                            <td>
+                                <span class="badge badge-info"><?php echo $patient['calculated_age'] ?? 'N/A'; ?></span>
+                            </td>
                                             <td>
                                                 <div style="font-size: 0.875rem;">
                                                     <?php if ($patient['phone']): ?>
                                                         <div><i class="fas fa-phone"></i> <?php echo htmlspecialchars($patient['phone']); ?></div>
                                                     <?php endif; ?>
                                                 </div>
-                                            </td>
-                                            <td>
-                                                <div class="text-center">
-                                                    <div style="font-weight: 600; font-size: 1.2rem;"><?php echo $patient['appointment_count']; ?></div>
-                                                    <?php if ($patient['pending_payments'] > 0): ?>
-                                                        <div style="font-size: 0.75rem; color: var(--danger-color);">
-                                                            <?php echo $patient['pending_payments']; ?> pending
-                                                        </div>
-                                                    <?php endif; ?>
-                                                </div>
-                                            </td>
+                                            </td>                            <td>
+                                <div class="text-center">
+                                    <div style="font-weight: 600; font-size: 1.2rem;"><?php echo $patient['appointment_count']; ?></div>
+                                    <div style="font-size: 0.75rem; color: var(--text-muted);">total visits</div>
+                                </div>
+                            </td>
                                             <td>
                                                 <?php if ($patient['last_appointment_date']): ?>
                                                     <div style="font-size: 0.875rem;">
@@ -324,14 +324,9 @@ function renderPageContent() {
                                                 <?php else: ?>
                                                     <span style="color: var(--text-muted); font-style: italic;">Never</span>
                                                 <?php endif; ?>
-                                            </td>
-                                            <td>
-                                                <?php if ($patient['pending_payments'] > 0): ?>
-                                                    <span class="badge badge-warning">Pending Payment</span>
-                                                <?php else: ?>
-                                                    <span class="badge badge-success">Active</span>
-                                                <?php endif; ?>
-                                            </td>
+                                            </td>                            <td>
+                                <span class="badge badge-success">Active</span>
+                            </td>
                                             <td>
                                                 <div class="btn-group">
                                                     <button onclick="viewPatient(<?php echo $patient['id']; ?>)" 
@@ -391,8 +386,24 @@ function renderPageContent() {
                                 <input type="email" name="email" id="patientEmail" class="form-control">
                             </div>
                             <div class="col-md-4 mb-3">
-                                <label class="form-label">Age</label>
-                                <input type="number" name="age" id="patientAge" class="form-control" min="0" max="120">
+                                <label class="form-label">Date of Birth</label>
+                                <input type="date" name="date_of_birth" id="patientDateOfBirth" class="form-control">
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Gender</label>
+                                <select name="gender" id="patientGender" class="form-select">
+                                    <option value="">Select Gender</option>
+                                    <option value="Male">Male</option>
+                                    <option value="Female">Female</option>
+                                    <option value="Other">Other</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Insurance Info</label>
+                                <input type="text" name="insurance_info" id="patientInsurance" class="form-control" placeholder="Insurance provider/policy">
                             </div>
                         </div>
                         
@@ -403,18 +414,24 @@ function renderPageContent() {
                         
                         <div class="row">
                             <div class="col-md-6 mb-3">
-                                <label class="form-label">Emergency Contact</label>
-                                <input type="text" name="emergency_contact" id="patientEmergencyContact" class="form-control">
+                                <label class="form-label">Emergency Contact Name</label>
+                                <input type="text" name="emergency_contact_name" id="patientEmergencyContactName" class="form-control">
                             </div>
                             <div class="col-md-6 mb-3">
-                                <label class="form-label">Emergency Phone</label>
-                                <input type="tel" name="emergency_phone" id="patientEmergencyPhone" class="form-control">
+                                <label class="form-label">Emergency Contact Phone</label>
+                                <input type="tel" name="emergency_contact_phone" id="patientEmergencyContactPhone" class="form-control">
                             </div>
                         </div>
                         
-                        <div class="mb-3">
-                            <label class="form-label">Medical History</label>
-                            <textarea name="medical_history" id="patientMedicalHistory" class="form-control" rows="3" placeholder="Any allergies, medical conditions, medications..."></textarea>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Medical History</label>
+                                <textarea name="medical_history" id="patientMedicalHistory" class="form-control" rows="3" placeholder="Medical conditions, surgeries, etc."></textarea>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Allergies</label>
+                                <textarea name="allergies" id="patientAllergies" class="form-control" rows="3" placeholder="Known allergies to medications, foods, etc."></textarea>
+                            </div>
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -426,6 +443,9 @@ function renderPageContent() {
         </div>
     </div>
 
+    <!-- Include SweetAlert2 -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
     <script>
         function showAddPatientModal() {
             document.getElementById('patientModalTitle').textContent = 'Add New Patient';
@@ -435,43 +455,263 @@ function renderPageContent() {
             new bootstrap.Modal(document.getElementById('patientModal')).show();
         }
 
-        function editPatient(patientId) {
-            // In a real implementation, you would fetch patient data via AJAX
-            // For now, show modal for editing
-            document.getElementById('patientModalTitle').textContent = 'Edit Patient';
-            document.getElementById('patientAction').value = 'update_patient';
-            document.getElementById('patientId').value = patientId;
-            document.getElementById('patientSubmitBtn').textContent = 'Update Patient';
-            new bootstrap.Modal(document.getElementById('patientModal')).show();
-        }
-
-        function viewPatient(patientId) {
-            // Placeholder for patient details view
-            alert('Patient details view will be implemented here. ID: ' + patientId);
-        }
-
-        function deletePatient(patientId) {
-            if (confirm('Are you sure you want to delete this patient? This action cannot be undone.')) {
-                const form = document.createElement('form');
-                form.method = 'POST';
-                form.innerHTML = `
-                    <input type="hidden" name="action" value="delete_patient">
-                    <input type="hidden" name="patient_id" value="${patientId}">
-                `;
-                document.body.appendChild(form);
-                form.submit();
+        async function editPatient(patientId) {
+            try {
+                const response = await fetch(`get_patient_details.php?id=${patientId}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const patient = data.patient;
+                    
+                    document.getElementById('patientModalTitle').textContent = 'Edit Patient';
+                    document.getElementById('patientAction').value = 'update_patient';
+                    document.getElementById('patientId').value = patientId;
+                    document.getElementById('patientSubmitBtn').textContent = 'Update Patient';
+                    
+                    // Populate form fields
+                    document.getElementById('patientFirstName').value = patient.first_name || '';
+                    document.getElementById('patientLastName').value = patient.last_name || '';
+                    document.getElementById('patientPhone').value = patient.phone || '';
+                    document.getElementById('patientEmail').value = patient.email || '';
+                    document.getElementById('patientDateOfBirth').value = patient.date_of_birth || '';
+                    document.getElementById('patientGender').value = patient.gender || '';
+                    document.getElementById('patientAddress').value = patient.address || '';
+                    document.getElementById('patientEmergencyContactName').value = patient.emergency_contact_name || '';
+                    document.getElementById('patientEmergencyContactPhone').value = patient.emergency_contact_phone || '';
+                    document.getElementById('patientMedicalHistory').value = patient.medical_history || '';
+                    document.getElementById('patientAllergies').value = patient.allergies || '';
+                    document.getElementById('patientInsurance').value = patient.insurance_info || '';
+                    
+                    new bootstrap.Modal(document.getElementById('patientModal')).show();
+                } else {
+                    Swal.fire('Error', data.error || 'Failed to load patient details', 'error');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                Swal.fire('Error', 'Network error occurred', 'error');
             }
         }
 
-        // Add badge styles
+        async function viewPatient(patientId) {
+            try {
+                const response = await fetch(`get_patient_details.php?id=${patientId}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const patient = data.patient;
+                    
+                    // Format the patient information
+                    const formatCurrency = (amount) => {
+                        return new Intl.NumberFormat('en-PH', {
+                            style: 'currency',
+                            currency: 'PHP'
+                        }).format(amount || 0);
+                    };
+                    
+                    const formatDate = (dateString) => {
+                        if (!dateString) return 'Never';
+                        return new Date(dateString).toLocaleDateString('en-PH', {
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric'
+                        });
+                    };
+                    
+                    Swal.fire({
+                        title: `${patient.first_name} ${patient.last_name}`,
+                        html: `
+                            <div class="text-start">
+                                <div class="row mb-3">
+                                    <div class="col-6">
+                                        <strong>Patient ID:</strong><br>
+                                        <span class="badge badge-secondary">#${patient.id}</span>
+                                    </div>
+                                    <div class="col-6">
+                                        <strong>Age:</strong><br>
+                                        ${patient.calculated_age || 'Not specified'} years
+                                    </div>
+                                </div>
+                                
+                                <div class="row mb-3">
+                                    <div class="col-6">
+                                        <strong>Phone:</strong><br>
+                                        ${patient.phone || 'Not provided'}
+                                    </div>
+                                    <div class="col-6">
+                                        <strong>Email:</strong><br>
+                                        ${patient.email || 'Not provided'}
+                                    </div>
+                                </div>
+                                
+                                <div class="row mb-3">
+                                    <div class="col-6">
+                                        <strong>Date of Birth:</strong><br>
+                                        ${formatDate(patient.date_of_birth) || 'Not provided'}
+                                    </div>
+                                    <div class="col-6">
+                                        <strong>Gender:</strong><br>
+                                        ${patient.gender || 'Not specified'}
+                                    </div>
+                                </div>
+                                
+                                ${patient.address ? `
+                                <div class="mb-3">
+                                    <strong>Address:</strong><br>
+                                    ${patient.address}
+                                </div>
+                                ` : ''}
+                                
+                                <div class="row mb-3">
+                                    <div class="col-6">
+                                        <strong>Emergency Contact:</strong><br>
+                                        ${patient.emergency_contact_name || 'Not provided'}
+                                    </div>
+                                    <div class="col-6">
+                                        <strong>Emergency Phone:</strong><br>
+                                        ${patient.emergency_contact_phone || 'Not provided'}
+                                    </div>
+                                </div>
+                                
+                                ${patient.allergies ? `
+                                <div class="mb-3">
+                                    <strong>Allergies:</strong><br>
+                                    <div class="bg-warning bg-opacity-10 p-2 rounded border border-warning">
+                                        ${patient.allergies}
+                                    </div>
+                                </div>
+                                ` : ''}
+                                
+                                ${patient.insurance_info ? `
+                                <div class="mb-3">
+                                    <strong>Insurance Information:</strong><br>
+                                    <div class="bg-light p-2 rounded">
+                                        ${patient.insurance_info}
+                                    </div>
+                                </div>
+                                ` : ''}
+                                
+                                ${patient.medical_history ? `
+                                <div class="mb-3">
+                                    <strong>Medical History:</strong><br>
+                                    <div class="bg-light p-2 rounded" style="max-height: 100px; overflow-y: auto;">
+                                        ${patient.medical_history}
+                                    </div>
+                                </div>
+                                ` : ''}
+                                
+                                <hr>
+                                
+                                <div class="row text-center">
+                                    <div class="col-4">
+                                        <div class="stat-card-mini">
+                                            <div class="stat-value-mini">${patient.total_appointments || 0}</div>
+                                            <div class="stat-label-mini">Total Visits</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-4">
+                                        <div class="stat-card-mini">
+                                            <div class="stat-value-mini">${patient.upcoming_appointments || 0}</div>
+                                            <div class="stat-label-mini">Upcoming</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-4">
+                                        <div class="stat-card-mini">
+                                            <div class="stat-value-mini">${patient.completed_appointments || 0}</div>
+                                            <div class="stat-label-mini">Completed</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="mt-3">
+                                    <strong>Last Visit:</strong> ${formatDate(patient.last_appointment_date)}<br>
+                                    <strong>Member Since:</strong> ${formatDate(patient.created_at)}
+                                </div>
+                            </div>
+                        `,
+                        showCloseButton: true,
+                        showConfirmButton: false,
+                        width: '600px',
+                        customClass: {
+                            popup: 'patient-details-modal'
+                        }
+                    });
+                } else {
+                    Swal.fire('Error', data.error || 'Failed to load patient details', 'error');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                Swal.fire('Error', 'Network error occurred', 'error');
+            }
+        }
+
+        function deletePatient(patientId) {
+            Swal.fire({
+                title: 'Delete Patient?',
+                text: 'Are you sure you want to delete this patient? This action cannot be undone and will fail if the patient has existing appointments.',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#dc3545',
+                cancelButtonColor: '#6c757d',
+                confirmButtonText: 'Yes, delete!',
+                cancelButtonText: 'Cancel'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.innerHTML = `
+                        <input type="hidden" name="action" value="delete_patient">
+                        <input type="hidden" name="patient_id" value="${patientId}">
+                    `;
+                    document.body.appendChild(form);
+                    form.submit();
+                }
+            });
+        }
+
+        // Add badge and styling
         const style = document.createElement('style');
         style.textContent = `
-            .badge-secondary { background-color: var(--gray-500); }
-            .badge-primary { background-color: var(--primary-color); }
-            .badge-info { background-color: var(--info-color); }
-            .badge-warning { background-color: var(--warning-color); }
-            .badge-success { background-color: var(--success-color); }
-            .badge-danger { background-color: var(--danger-color); }
+            .badge-secondary { background-color: #6c757d; color: white; }
+            .badge-primary { background-color: #007bff; color: white; }
+            .badge-info { background-color: #17a2b8; color: white; }
+            .badge-warning { background-color: #ffc107; color: #212529; }
+            .badge-success { background-color: #28a745; color: white; }
+            .badge-danger { background-color: #dc3545; color: white; }
+            
+            .stat-card-mini {
+                background: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 8px;
+                padding: 10px;
+                margin: 5px;
+            }
+            
+            .stat-value-mini {
+                font-size: 1.2rem;
+                font-weight: bold;
+                color: #495057;
+            }
+            
+            .stat-label-mini {
+                font-size: 0.75rem;
+                color: #6c757d;
+                margin-top: 2px;
+            }
+            
+            .patient-details-modal .swal2-html-container {
+                text-align: left !important;
+            }
+            
+            .table th {
+                border-top: none;
+                font-weight: 600;
+                color: #495057;
+                background-color: #f8f9fa;
+            }
+            
+            .table-hover tbody tr:hover {
+                background-color: rgba(0, 123, 255, 0.05);
+            }
         `;
         document.head.appendChild(style);
     </script>

@@ -20,7 +20,6 @@ if ($_POST && isset($_POST['action'])) {
         $specialization = sanitize($_POST['specialization']);
         $license_number = sanitize($_POST['license_number']);
         $experience_years = intval($_POST['experience_years']);
-        $consultation_fee = floatval($_POST['consultation_fee']);
         $username = sanitize($_POST['username']);
         $password = $_POST['password'];
         
@@ -31,13 +30,30 @@ if ($_POST && isset($_POST['action'])) {
             if ($stmt->fetch()) {
                 $error = "Username or email already exists.";
             } else {
-                $hashed_password = password_hash($password, PASSWORD_DEFAULT);
-                $stmt = $pdo->prepare("
-                    INSERT INTO users (username, password, email, first_name, last_name, phone, role, status, specialization, license_number, experience_years, consultation_fee, created_at) 
-                    VALUES (?, ?, ?, ?, ?, ?, 'dentist', 'active', ?, ?, ?, ?, NOW())
-                ");
-                $stmt->execute([$username, $hashed_password, $email, $first_name, $last_name, $phone, $specialization, $license_number, $experience_years, $consultation_fee]);
-                $message = "Dentist added successfully.";
+                $pdo->beginTransaction();
+                try {
+                    // Insert user record
+                    $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+                    $stmt = $pdo->prepare("
+                        INSERT INTO users (username, password, email, first_name, last_name, phone, role, status, created_at) 
+                        VALUES (?, ?, ?, ?, ?, ?, 'dentist', 'active', NOW())
+                    ");
+                    $stmt->execute([$username, $hashed_password, $email, $first_name, $last_name, $phone]);
+                    $user_id = $pdo->lastInsertId();
+                    
+                    // Insert dentist profile record
+                    $stmt = $pdo->prepare("
+                        INSERT INTO dentist_profiles (user_id, specialization, license_number, years_of_experience, created_at) 
+                        VALUES (?, ?, ?, ?, NOW())
+                    ");
+                    $stmt->execute([$user_id, $specialization, $license_number, $experience_years]);
+                    
+                    $pdo->commit();
+                    $message = "Dentist added successfully.";
+                } catch (Exception $e) {
+                    $pdo->rollBack();
+                    throw $e;
+                }
             }
         } catch (PDOException $e) {
             $error = "Error adding dentist: " . $e->getMessage();
@@ -51,19 +67,31 @@ if ($_POST && isset($_POST['action'])) {
         $specialization = sanitize($_POST['specialization']);
         $license_number = sanitize($_POST['license_number']);
         $experience_years = intval($_POST['experience_years']);
-        $consultation_fee = floatval($_POST['consultation_fee']);
         $status = sanitize($_POST['status']);
         
         try {
+            $pdo->beginTransaction();
+            
+            // Update user record
             $stmt = $pdo->prepare("
                 UPDATE users 
-                SET first_name = ?, last_name = ?, email = ?, phone = ?, specialization = ?, 
-                    license_number = ?, experience_years = ?, consultation_fee = ?, status = ?, updated_at = NOW()
+                SET first_name = ?, last_name = ?, email = ?, phone = ?, status = ?, updated_at = NOW()
                 WHERE id = ? AND role = 'dentist'
             ");
-            $stmt->execute([$first_name, $last_name, $email, $phone, $specialization, $license_number, $experience_years, $consultation_fee, $status, $dentist_id]);
+            $stmt->execute([$first_name, $last_name, $email, $phone, $status, $dentist_id]);
+            
+            // Update dentist profile record
+            $stmt = $pdo->prepare("
+                UPDATE dentist_profiles 
+                SET specialization = ?, license_number = ?, years_of_experience = ?, updated_at = NOW()
+                WHERE user_id = ?
+            ");
+            $stmt->execute([$specialization, $license_number, $experience_years, $dentist_id]);
+            
+            $pdo->commit();
             $message = "Dentist updated successfully.";
         } catch (PDOException $e) {
+            $pdo->rollBack();
             $error = "Error updating dentist: " . $e->getMessage();
         }
     } elseif ($action === 'toggle_status') {
@@ -88,11 +116,11 @@ $filter_status = $_GET['status'] ?? '';
 $filter_specialization = $_GET['specialization'] ?? '';
 
 // Build query conditions
-$conditions = ["role = 'dentist'"];
+$conditions = ["u.role = 'dentist'"];
 $params = [];
 
 if ($search) {
-    $conditions[] = "(first_name LIKE ? OR last_name LIKE ? OR email LIKE ? OR phone LIKE ?)";
+    $conditions[] = "(u.first_name LIKE ? OR u.last_name LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)";
     $search_param = "%$search%";
     $params[] = $search_param;
     $params[] = $search_param;
@@ -101,12 +129,12 @@ if ($search) {
 }
 
 if ($filter_status) {
-    $conditions[] = "status = ?";
+    $conditions[] = "u.status = ?";
     $params[] = $filter_status;
 }
 
 if ($filter_specialization) {
-    $conditions[] = "specialization LIKE ?";
+    $conditions[] = "dp.specialization LIKE ?";
     $params[] = "%$filter_specialization%";
 }
 
@@ -116,10 +144,14 @@ try {
     // Get dentists with appointment counts
     $stmt = $pdo->prepare("
         SELECT u.*, 
+               dp.specialization,
+               dp.license_number,
+               dp.years_of_experience,
                COUNT(a.id) as appointment_count,
                COUNT(CASE WHEN a.appointment_date >= CURDATE() THEN 1 END) as upcoming_appointments,
                MAX(a.appointment_date) as last_appointment_date
         FROM users u
+        LEFT JOIN dentist_profiles dp ON u.id = dp.user_id
         LEFT JOIN appointments a ON u.id = a.dentist_id
         $where_clause
         GROUP BY u.id
@@ -132,16 +164,17 @@ try {
     $stmt = $pdo->query("
         SELECT 
             COUNT(*) as total_dentists,
-            COUNT(CASE WHEN status = 'active' THEN 1 END) as active_dentists,
-            COUNT(CASE WHEN created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 END) as new_dentists_30d,
-            AVG(experience_years) as avg_experience
-        FROM users 
-        WHERE role = 'dentist'
+            COUNT(CASE WHEN u.status = 'active' THEN 1 END) as active_dentists,
+            COUNT(CASE WHEN u.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 END) as new_dentists_30d,
+            AVG(dp.years_of_experience) as avg_experience
+        FROM users u
+        LEFT JOIN dentist_profiles dp ON u.id = dp.user_id
+        WHERE u.role = 'dentist'
     ");
     $stats = $stmt->fetch();
     
     // Get unique specializations
-    $stmt = $pdo->query("SELECT DISTINCT specialization FROM users WHERE role = 'dentist' AND specialization IS NOT NULL ORDER BY specialization");
+    $stmt = $pdo->query("SELECT DISTINCT specialization FROM dentist_profiles WHERE specialization IS NOT NULL ORDER BY specialization");
     $specializations = $stmt->fetchAll(PDO::FETCH_COLUMN);
     
 } catch (PDOException $e) {
@@ -175,49 +208,6 @@ function renderPageContent() {
                 <div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div>
             <?php endif; ?>
 
-            <!-- Statistics -->
-            <div class="stats-grid mb-4">
-                <div class="stat-card primary">
-                    <div class="stat-icon">
-                        <i class="fas fa-user-md"></i>
-                    </div>
-                    <div>
-                        <div class="stat-value"><?php echo $stats['total_dentists']; ?></div>
-                        <div class="stat-label">Total Dentists</div>
-                    </div>
-                </div>
-                
-                <div class="stat-card success">
-                    <div class="stat-icon">
-                        <i class="fas fa-check-circle"></i>
-                    </div>
-                    <div>
-                        <div class="stat-value"><?php echo $stats['active_dentists']; ?></div>
-                        <div class="stat-label">Active</div>
-                    </div>
-                </div>
-                
-                <div class="stat-card info">
-                    <div class="stat-icon">
-                        <i class="fas fa-graduation-cap"></i>
-                    </div>
-                    <div>
-                        <div class="stat-value"><?php echo round($stats['avg_experience']); ?></div>
-                        <div class="stat-label">Avg Experience (years)</div>
-                    </div>
-                </div>
-                
-                <div class="stat-card warning">
-                    <div class="stat-icon">
-                        <i class="fas fa-user-plus"></i>
-                    </div>
-                    <div>
-                        <div class="stat-value"><?php echo $stats['new_dentists_30d']; ?></div>
-                        <div class="stat-label">New (30 days)</div>
-                    </div>
-                </div>
-            </div>
-
             <!-- Search and Filters -->
             <div class="card mb-4">
                 <div class="card-header">
@@ -227,16 +217,16 @@ function renderPageContent() {
                     </h5>
                 </div>
                 <div class="card-body">
-                    <form method="GET" class="row g-3">
+                    <form id="searchForm" class="row g-3">
                         <div class="col-md-4">
                             <label class="form-label">Search</label>
-                            <input type="text" name="search" class="form-control" 
+                            <input type="text" name="search" id="searchInput" class="form-control" 
                                    placeholder="Name, email, or phone..." 
                                    value="<?php echo htmlspecialchars($search); ?>">
                         </div>
                         <div class="col-md-3">
                             <label class="form-label">Status</label>
-                            <select name="status" class="form-select">
+                            <select name="status" id="statusFilter" class="form-select">
                                 <option value="">All Statuses</option>
                                 <option value="active" <?php echo $filter_status === 'active' ? 'selected' : ''; ?>>Active</option>
                                 <option value="inactive" <?php echo $filter_status === 'inactive' ? 'selected' : ''; ?>>Inactive</option>
@@ -244,7 +234,7 @@ function renderPageContent() {
                         </div>
                         <div class="col-md-3">
                             <label class="form-label">Specialization</label>
-                            <select name="specialization" class="form-select">
+                            <select name="specialization" id="specializationFilter" class="form-select">
                                 <option value="">All Specializations</option>
                                 <?php foreach ($specializations as $spec): ?>
                                     <option value="<?php echo htmlspecialchars($spec); ?>" <?php echo $filter_specialization === $spec ? 'selected' : ''; ?>>
@@ -256,9 +246,9 @@ function renderPageContent() {
                         <div class="col-md-2">
                             <label class="form-label">&nbsp;</label>
                             <div>
-                                <button type="submit" class="btn btn-primary w-100">
-                                    <i class="fas fa-search"></i>
-                                    Search
+                                <button type="button" id="clearFilters" class="btn btn-outline-secondary w-100">
+                                    <i class="fas fa-times"></i>
+                                    Clear
                                 </button>
                             </div>
                         </div>
@@ -287,94 +277,21 @@ function renderPageContent() {
                         </div>
                     <?php else: ?>
                         <div class="table-responsive">
-                            <table class="table table-hover">
+                            <table class="table table-hover" id="dentistTable">
                                 <thead>
                                     <tr>
                                         <th>Dentist</th>
-                                        <th>Contact</th>
+                                        <th>Phone</th>
                                         <th>Specialization</th>
-                                        <th>Experience</th>
                                         <th>License</th>
-                                        <th>Fee</th>
-                                        <th>Appointments</th>
+                                        <th>Experience</th>
                                         <th>Status</th>
+                                        <th>Appointments</th>
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
-                                <tbody>
-                                    <?php foreach ($dentists as $dentist): ?>
-                                        <tr>
-                                            <td>
-                                                <div style="font-weight: 600;">Dr. <?php echo htmlspecialchars($dentist['first_name'] . ' ' . $dentist['last_name']); ?></div>
-                                                <div style="font-size: 0.875rem; color: var(--text-muted);">
-                                                    ID: #<?php echo $dentist['id']; ?>
-                                                </div>
-                                            </td>
-                                            <td>
-                                                <div style="font-size: 0.875rem;">
-                                                    <?php if ($dentist['email']): ?>
-                                                        <div><i class="fas fa-envelope"></i> <?php echo htmlspecialchars($dentist['email']); ?></div>
-                                                    <?php endif; ?>
-                                                    <?php if ($dentist['phone']): ?>
-                                                        <div><i class="fas fa-phone"></i> <?php echo htmlspecialchars($dentist['phone']); ?></div>
-                                                    <?php endif; ?>
-                                                </div>
-                                            </td>
-                                            <td>
-                                                <?php if ($dentist['specialization']): ?>
-                                                    <span class="badge badge-primary"><?php echo htmlspecialchars($dentist['specialization']); ?></span>
-                                                <?php else: ?>
-                                                    <span style="color: var(--text-muted); font-style: italic;">General</span>
-                                                <?php endif; ?>
-                                            </td>
-                                            <td>
-                                                <span class="badge badge-info"><?php echo $dentist['experience_years'] ?? 0; ?> years</span>
-                                            </td>
-                                            <td>
-                                                <div style="font-size: 0.875rem;">
-                                                    <?php echo htmlspecialchars($dentist['license_number'] ?? 'N/A'); ?>
-                                                </div>
-                                            </td>
-                                            <td>
-                                                <div style="font-weight: 600;">
-                                                    <?php echo formatCurrency($dentist['consultation_fee'] ?? 0); ?>
-                                                </div>
-                                            </td>
-                                            <td>
-                                                <div class="text-center">
-                                                    <div style="font-weight: 600;"><?php echo $dentist['appointment_count']; ?></div>
-                                                    <div style="font-size: 0.75rem; color: var(--text-muted);">
-                                                        <?php echo $dentist['upcoming_appointments']; ?> upcoming
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td>
-                                                <?php
-                                                $status_class = $dentist['status'] === 'active' ? 'success' : 'danger';
-                                                ?>
-                                                <span class="badge badge-<?php echo $status_class; ?>">
-                                                    <?php echo ucfirst($dentist['status']); ?>
-                                                </span>
-                                            </td>
-                                            <td>
-                                                <div class="btn-group">
-                                                    <button onclick="viewDentist(<?php echo $dentist['id']; ?>)" 
-                                                            class="btn btn-sm btn-outline-primary" title="View">
-                                                        <i class="fas fa-eye"></i>
-                                                    </button>
-                                                    <button onclick="editDentist(<?php echo $dentist['id']; ?>)" 
-                                                            class="btn btn-sm btn-outline-secondary" title="Edit">
-                                                        <i class="fas fa-edit"></i>
-                                                    </button>
-                                                    <button onclick="toggleStatus(<?php echo $dentist['id']; ?>, '<?php echo $dentist['status'] === 'active' ? 'inactive' : 'active'; ?>')" 
-                                                            class="btn btn-sm btn-outline-<?php echo $dentist['status'] === 'active' ? 'danger' : 'success'; ?>" 
-                                                            title="<?php echo $dentist['status'] === 'active' ? 'Deactivate' : 'Activate'; ?>">
-                                                        <i class="fas fa-<?php echo $dentist['status'] === 'active' ? 'ban' : 'check'; ?>"></i>
-                                                    </button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
+                                <tbody id="dentistTableBody">
+                                    <?php include 'dentist_table_content.php'; ?>
                                 </tbody>
                             </table>
                         </div>
@@ -434,8 +351,11 @@ function renderPageContent() {
                                 <input type="number" name="experience_years" id="dentistExperience" class="form-control" min="0" max="50">
                             </div>
                             <div class="col-md-6 mb-3">
-                                <label class="form-label">Consultation Fee</label>
-                                <input type="number" name="consultation_fee" id="dentistFee" class="form-control" step="0.01" min="0">
+                                <label class="form-label">Status</label>
+                                <select name="status" id="dentistStatus" class="form-select">
+                                    <option value="active">Active</option>
+                                    <option value="inactive">Inactive</option>
+                                </select>
                             </div>
                         </div>
                         
@@ -451,11 +371,6 @@ function renderPageContent() {
                         </div>
                         
                         <div class="mb-3" id="statusField" style="display: none;">
-                            <label class="form-label">Status</label>
-                            <select name="status" id="dentistStatus" class="form-select">
-                                <option value="active">Active</option>
-                                <option value="inactive">Inactive</option>
-                            </select>
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -467,7 +382,49 @@ function renderPageContent() {
         </div>
     </div>
 
+    <!-- Include SweetAlert2 -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
     <script>
+        // AJAX search functionality
+        let searchTimeout;
+        
+        function performSearch() {
+            const formData = new FormData(document.getElementById('searchForm'));
+            const params = new URLSearchParams(formData);
+            
+            fetch('search_dentists.php?' + params.toString())
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('dentistTableBody').innerHTML = data.html;
+                        document.querySelector('.card-header h5').innerHTML = 
+                            `<i class="fas fa-list"></i> Dentist Records (${data.count})`;
+                    } else {
+                        console.error('Search error:', data.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Network error:', error);
+                });
+        }
+        
+        // Debounced search on input
+        document.getElementById('searchInput').addEventListener('input', function() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(performSearch, 300);
+        });
+        
+        // Immediate search on filter change
+        document.getElementById('statusFilter').addEventListener('change', performSearch);
+        document.getElementById('specializationFilter').addEventListener('change', performSearch);
+        
+        // Clear filters
+        document.getElementById('clearFilters').addEventListener('click', function() {
+            document.getElementById('searchForm').reset();
+            performSearch();
+        });
+
         function showAddDentistModal() {
             document.getElementById('dentistModalTitle').textContent = 'Add New Dentist';
             document.getElementById('dentistAction').value = 'add_dentist';
@@ -478,43 +435,135 @@ function renderPageContent() {
             new bootstrap.Modal(document.getElementById('dentistModal')).show();
         }
 
-        function editDentist(dentistId) {
-            document.getElementById('dentistModalTitle').textContent = 'Edit Dentist';
-            document.getElementById('dentistAction').value = 'update_dentist';
-            document.getElementById('dentistId').value = dentistId;
-            document.getElementById('dentistSubmitBtn').textContent = 'Update Dentist';
-            document.getElementById('loginCredentials').style.display = 'none';
-            document.getElementById('statusField').style.display = 'block';
-            new bootstrap.Modal(document.getElementById('dentistModal')).show();
-        }
-
-        function viewDentist(dentistId) {
-            // Placeholder for dentist details view
-            alert('Dentist details view will be implemented here. ID: ' + dentistId);
-        }
-
-        function toggleStatus(dentistId, newStatus) {
-            const action = newStatus === 'active' ? 'activate' : 'deactivate';
-            if (confirm(`Are you sure you want to ${action} this dentist?`)) {
-                const form = document.createElement('form');
-                form.method = 'POST';
-                form.innerHTML = `
-                    <input type="hidden" name="action" value="toggle_status">
-                    <input type="hidden" name="dentist_id" value="${dentistId}">
-                    <input type="hidden" name="new_status" value="${newStatus}">
-                `;
-                document.body.appendChild(form);
-                form.submit();
+        async function editDentist(dentistId) {
+            try {
+                const response = await fetch(`get_dentist_details.php?id=${dentistId}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const dentist = data.dentist;
+                    
+                    document.getElementById('dentistModalTitle').textContent = 'Edit Dentist';
+                    document.getElementById('dentistAction').value = 'update_dentist';
+                    document.getElementById('dentistId').value = dentistId;
+                    document.getElementById('dentistSubmitBtn').textContent = 'Update Dentist';
+                    document.getElementById('loginCredentials').style.display = 'none';
+                    document.getElementById('statusField').style.display = 'none';
+                    
+                    // Populate form fields
+                    document.getElementById('dentistFirstName').value = dentist.first_name || '';
+                    document.getElementById('dentistLastName').value = dentist.last_name || '';
+                    document.getElementById('dentistEmail').value = dentist.email || '';
+                    document.getElementById('dentistPhone').value = dentist.phone || '';
+                    document.getElementById('dentistSpecialization').value = dentist.specialization || '';
+                    document.getElementById('dentistLicense').value = dentist.license_number || '';
+                    document.getElementById('dentistExperience').value = dentist.years_of_experience || '';
+                    document.getElementById('dentistStatus').value = dentist.status || 'active';
+                    
+                    new bootstrap.Modal(document.getElementById('dentistModal')).show();
+                } else {
+                    Swal.fire('Error', data.error || 'Failed to load dentist details', 'error');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                Swal.fire('Error', 'Network error occurred', 'error');
             }
         }
 
-        // Add badge styles
+        async function viewDentist(dentistId) {
+            try {
+                const response = await fetch(`get_dentist_details.php?id=${dentistId}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const dentist = data.dentist;
+                    
+                    Swal.fire({
+                        title: `Dr. ${dentist.first_name} ${dentist.last_name}`,
+                        html: `
+                            <div class="text-start">
+                                <p><strong>Email:</strong> ${dentist.email || 'Not provided'}</p>
+                                <p><strong>Phone:</strong> ${dentist.phone || 'Not provided'}</p>
+                                <p><strong>Specialization:</strong> ${dentist.specialization || 'General'}</p>
+                                <p><strong>License Number:</strong> ${dentist.license_number || 'Not provided'}</p>
+                                <p><strong>Experience:</strong> ${dentist.years_of_experience || 0} years</p>
+                                <p><strong>Status:</strong> <span class="badge badge-${dentist.status === 'active' ? 'success' : 'warning'}">${dentist.status}</span></p>
+                                <p><strong>Member Since:</strong> ${new Date(dentist.created_at).toLocaleDateString()}</p>
+                            </div>
+                        `,
+                        showCloseButton: true,
+                        showConfirmButton: false,
+                        width: '500px'
+                    });
+                } else {
+                    Swal.fire('Error', data.error || 'Failed to load dentist details', 'error');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                Swal.fire('Error', 'Network error occurred', 'error');
+            }
+        }
+
+        function toggleDentistStatus(dentistId, newStatus) {
+            const action = newStatus === 'active' ? 'activate' : 'deactivate';
+            
+            Swal.fire({
+                title: `${action.charAt(0).toUpperCase() + action.slice(1)} Dentist?`,
+                text: `Are you sure you want to ${action} this dentist?`,
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: newStatus === 'active' ? '#28a745' : '#ffc107',
+                cancelButtonColor: '#6c757d',
+                confirmButtonText: `Yes, ${action}!`,
+                cancelButtonText: 'Cancel'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.innerHTML = `
+                        <input type="hidden" name="action" value="toggle_status">
+                        <input type="hidden" name="dentist_id" value="${dentistId}">
+                        <input type="hidden" name="new_status" value="${newStatus}">
+                    `;
+                    document.body.appendChild(form);
+                    form.submit();
+                }
+            });
+        }
+
+        // Add CSS for badges and avatar circles
         const style = document.createElement('style');
         style.textContent = `
-            .badge-primary { background-color: var(--primary-color); }
-            .badge-info { background-color: var(--info-color); }
-            .badge-success { background-color: var(--success-color); }
-            .badge-danger { background-color: var(--danger-color); }
+            .badge-primary { background-color: #007bff; color: white; }
+            .badge-info { background-color: #17a2b8; color: white; }
+            .badge-success { background-color: #28a745; color: white; }
+            .badge-warning { background-color: #ffc107; color: #212529; }
+            .badge-danger { background-color: #dc3545; color: white; }
+            
+            .avatar-circle {
+                width: 40px;
+                height: 40px;
+                border-radius: 50%;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: white;
+                font-weight: bold;
+                font-size: 14px;
+                flex-shrink: 0;
+            }
+            
+            .table th {
+                border-top: none;
+                font-weight: 600;
+                color: #495057;
+                background-color: #f8f9fa;
+            }
+            
+            .table-hover tbody tr:hover {
+                background-color: rgba(0, 123, 255, 0.05);
+            }
         `;
         document.head.appendChild(style);
     </script>
