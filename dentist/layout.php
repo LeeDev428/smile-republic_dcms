@@ -53,21 +53,9 @@ function renderDentistLayout($pageTitle, $pageContent, $activeMenu = '', $additi
                     <i class="fas fa-users"></i>
                     My Patients
                 </a>
-                <a href="treatments.php" <?php echo $activeMenu === 'treatments' ? 'class="active"' : ''; ?>>
-                    <i class="fas fa-tooth"></i>
-                    Treatment Records
-                </a>
-                <a href="prescriptions.php" <?php echo $activeMenu === 'prescriptions' ? 'class="active"' : ''; ?>>
-                    <i class="fas fa-prescription-bottle-alt"></i>
-                    Prescriptions
-                </a>
-                <a href="notes.php" <?php echo $activeMenu === 'notes' ? 'class="active"' : ''; ?>>
-                    <i class="fas fa-sticky-note"></i>
-                    Patient Notes
-                </a>
-                <a href="availability.php" <?php echo $activeMenu === 'availability' ? 'class="active"' : ''; ?>>
-                    <i class="fas fa-clock"></i>
-                    Set Availability
+                <a href="compensation.php" <?php echo $activeMenu === 'compensation' ? 'class="active"' : ''; ?> >
+                    <i class="fas fa-money-check-alt"></i>
+                    Commission
                 </a>
                 <div style="border-top: 1px solid var(--border-color); margin: 1rem 0; padding-top: 1rem;">
                     <a href="../logout.php" style="color: var(--danger-color);">

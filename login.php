@@ -2,7 +2,7 @@
 require_once 'includes/config.php';
 
 // Redirect if already logged in
-if (isLoggedIn()) {
+if (isLoggedIn() && isset($_SESSION['role'])) {
     switch ($_SESSION['role']) {
         case 'admin':
             redirect('admin/dashboard.php');

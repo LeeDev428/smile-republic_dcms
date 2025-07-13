@@ -57,14 +57,7 @@ function renderFrontdeskLayout($pageTitle, $pageContent, $activeMenu = '', $addi
                     <i class="fas fa-user-plus"></i>
                     Register Patient
                 </a>
-                <a href="check-in.php" <?php echo $activeMenu === 'check-in' ? 'class="active"' : ''; ?>>
-                    <i class="fas fa-check-circle"></i>
-                    Patient Check-in
-                </a>
-                <a href="payments.php" <?php echo $activeMenu === 'payments' ? 'class="active"' : ''; ?>>
-                    <i class="fas fa-credit-card"></i>
-                    Payments
-                </a>
+             
                 <div style="border-top: 1px solid var(--border-color); margin: 1rem 0; padding-top: 1rem;">
                     <a href="../logout.php" style="color: var(--danger-color);">
                         <i class="fas fa-sign-out-alt"></i>

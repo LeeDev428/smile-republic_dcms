@@ -19,10 +19,10 @@ try {
     $stmt->execute([$dentist_id]);
     $week_appointments = $stmt->fetch()['total'];
     
-    // Completed treatments this month
-    $stmt = $pdo->prepare("SELECT COUNT(*) as total FROM appointments WHERE dentist_id = ? AND MONTH(appointment_date) = MONTH(CURDATE()) AND YEAR(appointment_date) = YEAR(CURDATE()) AND status = 'completed'");
+    // Total appointments
+    $stmt = $pdo->prepare("SELECT COUNT(*) as total FROM appointments WHERE dentist_id = ? AND status NOT IN ('cancelled', 'no_show')");
     $stmt->execute([$dentist_id]);
-    $monthly_treatments = $stmt->fetch()['total'];
+    $total_appointments = $stmt->fetch()['total'];
     
     // Total patients treated
     $stmt = $pdo->prepare("SELECT COUNT(DISTINCT patient_id) as total FROM appointments WHERE dentist_id = ? AND status = 'completed'");
@@ -65,7 +65,7 @@ try {
 require_once 'layout.php';
 
 function renderPageContent() {
-    global $dentist_id, $today_appointments, $week_appointments, $monthly_treatments, 
+    global $dentist_id, $today_appointments, $week_appointments, $total_appointments, 
            $total_patients, $today_schedule, $upcoming_appointments, $error;
 ?>
             <div class="d-flex justify-content-between align-items-center mb-4">
@@ -90,11 +90,11 @@ function renderPageContent() {
                 <div class="stat-card primary">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
-                            <div class="stat-value"><?php echo number_format($today_appointments); ?></div>
-                            <div class="stat-label">Today's Appointments</div>
+                            <div class="stat-value"><?php echo number_format($total_appointments); ?></div>
+                            <div class="stat-label">Total Appointments</div>
                         </div>
                         <div style="font-size: 2rem; color: var(--primary-color); opacity: 0.7;">
-                            <i class="fas fa-calendar-day"></i>
+                            <i class="fas fa-calendar-check"></i>
                         </div>
                     </div>
                 </div>
@@ -102,11 +102,11 @@ function renderPageContent() {
                 <div class="stat-card warning">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
-                            <div class="stat-value"><?php echo number_format($week_appointments); ?></div>
-                            <div class="stat-label">This Week</div>
+                            <div class="stat-value"><?php echo number_format($today_appointments); ?></div>
+                            <div class="stat-label">Today's Appointments</div>
                         </div>
                         <div style="font-size: 2rem; color: var(--warning-color); opacity: 0.7;">
-                            <i class="fas fa-calendar-week"></i>
+                            <i class="fas fa-calendar-day"></i>
                         </div>
                     </div>
                 </div>
@@ -114,11 +114,11 @@ function renderPageContent() {
                 <div class="stat-card success">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
-                            <div class="stat-value"><?php echo number_format($monthly_treatments); ?></div>
-                            <div class="stat-label">Treatments This Month</div>
+                            <div class="stat-value"><?php echo number_format($week_appointments); ?></div>
+                            <div class="stat-label">This Week</div>
                         </div>
                         <div style="font-size: 2rem; color: var(--success-color); opacity: 0.7;">
-                            <i class="fas fa-check-circle"></i>
+                            <i class="fas fa-calendar-week"></i>
                         </div>
                     </div>
                 </div>

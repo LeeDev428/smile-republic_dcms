@@ -18,13 +18,13 @@ if ($_POST && isset($_POST['action'])) {
         $duration_minutes = intval($_POST['duration_minutes']);
         $price = floatval($_POST['price']);
         $category = sanitize($_POST['category']);
-        
+        $commission = isset($_POST['commission']) ? floatval($_POST['commission']) : 0;
         try {
             $stmt = $pdo->prepare("
-                INSERT INTO dental_operations (name, description, duration_minutes, price, category, created_at) 
-                VALUES (?, ?, ?, ?, ?, NOW())
+                INSERT INTO dental_operations (name, description, duration_minutes, price, category, commission, created_at) 
+                VALUES (?, ?, ?, ?, ?, ?, NOW())
             ");
-            $stmt->execute([$name, $description, $duration_minutes, $price, $category]);
+            $stmt->execute([$name, $description, $duration_minutes, $price, $category, $commission]);
             $message = "Service added successfully.";
         } catch (PDOException $e) {
             $error = "Error adding service: " . $e->getMessage();
@@ -36,14 +36,14 @@ if ($_POST && isset($_POST['action'])) {
         $duration_minutes = intval($_POST['duration_minutes']);
         $price = floatval($_POST['price']);
         $category = sanitize($_POST['category']);
-        
+        $commission = isset($_POST['commission']) ? floatval($_POST['commission']) : 0;
         try {
             $stmt = $pdo->prepare("
                 UPDATE dental_operations 
-                SET name = ?, description = ?, duration_minutes = ?, price = ?, category = ?, updated_at = NOW()
+                SET name = ?, description = ?, duration_minutes = ?, price = ?, category = ?, commission = ?, updated_at = NOW()
                 WHERE id = ?
             ");
-            $stmt->execute([$name, $description, $duration_minutes, $price, $category, $service_id]);
+            $stmt->execute([$name, $description, $duration_minutes, $price, $category, $commission, $service_id]);
             $message = "Service updated successfully.";
         } catch (PDOException $e) {
             $error = "Error updating service: " . $e->getMessage();
@@ -264,6 +264,7 @@ function renderPageContent() {
                                         <th>Category</th>
                                         <th>Duration</th>
                                         <th>Price</th>
+                                        <th>Commission (%)</th>
                                         <th>Usage</th>
                                         <th>Recent Usage</th>
                                         <th>Actions</th>
@@ -289,11 +290,16 @@ function renderPageContent() {
                                                 <?php endif; ?>
                                             </td>
                                             <td>
-                                                <span class="badge badge-info"><?php echo $service['duration_minutes']; ?> min</span>
+                                                <span class="badge badge-info" style="font-weight: 600; color: black;"><?php echo $service['duration_minutes']; ?> min</span>
                                             </td>
                                             <td>
                                                 <div style="font-weight: 600; color: var(--success-color);">
                                                     <?php echo formatCurrency($service['price']); ?>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div style="font-weight: 600; color: #64748b;">
+                                                    <?php echo $service['commission'] !== null ? $service['commission'] : '0'; ?>%
                                                 </div>
                                             </td>
                                             <td>
@@ -310,13 +316,14 @@ function renderPageContent() {
                                             </td>
                                             <td>
                                                 <div class="btn-group">
+                                                    <button onclick="editService(<?php echo $service['id']; ?>)" 
+                                                            class="btn btn-sm btn-outline-secondary" title="Edit"
+                                                            data-service='<?php echo json_encode($service); ?>'>
+                                                        <i class="fas fa-edit"></i>
+                                                    </button>
                                                     <button onclick="viewService(<?php echo $service['id']; ?>)" 
                                                             class="btn btn-sm btn-outline-primary" title="View">
                                                         <i class="fas fa-eye"></i>
-                                                    </button>
-                                                    <button onclick="editService(<?php echo $service['id']; ?>)" 
-                                                            class="btn btn-sm btn-outline-secondary" title="Edit">
-                                                        <i class="fas fa-edit"></i>
                                                     </button>
                                                     <button onclick="deleteService(<?php echo $service['id']; ?>)" 
                                                             class="btn btn-sm btn-outline-danger" title="Delete">
@@ -357,13 +364,17 @@ function renderPageContent() {
                         </div>
                         
                         <div class="row">
-                            <div class="col-md-6 mb-3">
+                            <div class="col-md-4 mb-3">
                                 <label class="form-label">Duration (minutes) *</label>
                                 <input type="number" name="duration_minutes" id="serviceDuration" class="form-control" min="5" max="480" required>
                             </div>
-                            <div class="col-md-6 mb-3">
+                            <div class="col-md-4 mb-3">
                                 <label class="form-label">Price *</label>
                                 <input type="number" name="price" id="servicePrice" class="form-control" step="0.01" min="0" required>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Commission (%)</label>
+                                <input type="number" name="commission" id="serviceCommission" class="form-control" step="0.01" min="0" max="100" placeholder="Dentist commission percent">
                             </div>
                         </div>
                         
@@ -391,10 +402,29 @@ function renderPageContent() {
         }
 
         function editService(serviceId) {
+            // Find service data from table row
+            var service = null;
+            var btns = document.querySelectorAll('button[data-service]');
+            btns.forEach(function(btn) {
+                var data = btn.getAttribute('data-service');
+                if (data) {
+                    var obj = JSON.parse(data);
+                    if (obj.id == serviceId) service = obj;
+                }
+            });
             document.getElementById('serviceModalTitle').textContent = 'Edit Service';
             document.getElementById('serviceAction').value = 'update_service';
             document.getElementById('serviceId').value = serviceId;
             document.getElementById('serviceSubmitBtn').textContent = 'Update Service';
+            // Populate all fields
+            if (service) {
+                document.getElementById('serviceName').value = service.name || '';
+                document.getElementById('serviceCategory').value = service.category || '';
+                document.getElementById('serviceDuration').value = service.duration_minutes || '';
+                document.getElementById('servicePrice').value = service.price || '';
+                document.getElementById('serviceDescription').value = service.description || '';
+                document.getElementById('serviceCommission').value = service.commission !== null ? service.commission : '';
+            }
             new bootstrap.Modal(document.getElementById('serviceModal')).show();
         }
 

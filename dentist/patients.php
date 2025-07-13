@@ -44,6 +44,7 @@ try {
     // Get patients who have appointments with this dentist
     $stmt = $pdo->prepare("
         SELECT p.*, 
+               TIMESTAMPDIFF(YEAR, p.date_of_birth, CURDATE()) as calculated_age,
                COUNT(a.id) as appointment_count,
                MAX(a.appointment_date) as last_appointment_date,
                MIN(a.appointment_date) as first_appointment_date,
@@ -95,117 +96,162 @@ function renderPageContent() {
                 <div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div>
             <?php endif; ?>
 
-            <!-- Statistics -->
-            <div class="stats-grid mb-4">
-                <div class="stat-card primary">
-                    <div class="stat-icon">
-                        <i class="fas fa-users"></i>
+            <!-- Search and Filters -->
+            <div class="search-container mb-4">
+                <form method="GET" id="searchForm" class="search-form">
+                    <div class="search-group">
+                        <div class="search-input-wrapper">
+                            <i class="fas fa-search search-icon"></i>
+                            <input type="text" 
+                                   name="search" 
+                                   class="search-input" 
+                                   placeholder="Search by name, phone, or email..." 
+                                   value="<?php echo htmlspecialchars($search); ?>"
+                                   autocomplete="off">
+                        </div>
+                        <div class="search-filters">
+                            <div class="filter-group">
+                                <label class="filter-label">Age Range</label>
+                                <div class="filter-inputs">
+                                    <input type="number" 
+                                           name="age_min" 
+                                           class="form-control form-control-sm" 
+                                           placeholder="Min" 
+                                           min="0" 
+                                           max="120"
+                                           value="<?php echo htmlspecialchars($filter_age_min); ?>">
+                                    <span class="filter-separator">-</span>
+                                    <input type="number" 
+                                           name="age_max" 
+                                           class="form-control form-control-sm" 
+                                           placeholder="Max" 
+                                           min="0" 
+                                           max="120"
+                                           value="<?php echo htmlspecialchars($filter_age_max); ?>">
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-search">
+                                Search
+                            </button>
+                            <?php if ($search || $filter_age_min || $filter_age_max): ?>
+                                <a href="patients.php" class="btn btn-outline-secondary btn-clear">
+                                    Clear
+                                </a>
+                            <?php endif; ?>
+                        </div>
                     </div>
-                    <div>
-                        <div class="stat-value"><?php echo $stats['total_patients']; ?></div>
-                        <div class="stat-label">My Patients</div>
-                    </div>
-                </div>
-                
-                <div class="stat-card success">
-                    <div class="stat-icon">
-                        <i class="fas fa-check-circle"></i>
-                    </div>
-                    <div>
-                        <div class="stat-value"><?php echo $stats['completed_appointments']; ?></div>
-                        <div class="stat-label">Completed Treatments</div>
-                    </div>
-                </div>
-                
-                <div class="stat-card info">
-                    <div class="stat-icon">
-                        <i class="fas fa-calendar-alt"></i>
-                    </div>
-                    <div>
-                        <div class="stat-value"><?php echo $stats['total_appointments']; ?></div>
-                        <div class="stat-label">Total Appointments</div>
-                    </div>
-                </div>
-                
-                <div class="stat-card warning">
-                    <div class="stat-icon">
-                        <i class="fas fa-clock"></i>
-                    </div>
-                    <div>
-                        <div class="stat-value"><?php echo $stats['upcoming_appointments']; ?></div>
-                        <div class="stat-label">Upcoming</div>
-                    </div>
-                </div>
+                </form>
             </div>
 
-            <!-- Search and Filters -->
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 style="margin: 0;">
-                        <i class="fas fa-search"></i>
-                        Search & Filter Patients
-                    </h5>
-                </div>
-                <div class="card-body">
-                    <form method="GET" class="row g-3">
-                        <div class="col-md-4">
-                            <label class="form-label">Search</label>
-                            <input type="text" name="search" class="form-control" 
-                                   placeholder="Name, phone, or email..." 
-                                   value="<?php echo htmlspecialchars($search); ?>">
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label">Minimum Age</label>
-                            <input type="number" name="age_min" class="form-control" 
-                                   placeholder="e.g., 18" min="0" max="120"
-                                   value="<?php echo htmlspecialchars($filter_age_min); ?>">
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label">Maximum Age</label>
-                            <input type="number" name="age_max" class="form-control" 
-                                   placeholder="e.g., 65" min="0" max="120"
-                                   value="<?php echo htmlspecialchars($filter_age_max); ?>">
-                        </div>
-                        <div class="col-md-2">
-                            <label class="form-label">&nbsp;</label>
-                            <div>
-                                <button type="submit" class="btn btn-primary w-100">
-                                    <i class="fas fa-search"></i>
-                                    Search
-                                </button>
-                            </div>
-                        </div>
-                    </form>
-                </div>
-            </div>
+            <style>
+            .search-container {
+                background: var(--white);
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            }
+            .search-form {
+                padding: 1rem;
+            }
+            .search-group {
+                display: flex;
+                flex-direction: column;
+                gap: 1rem;
+            }
+            .search-input-wrapper {
+                position: relative;
+                flex-grow: 1;
+            }
+            .search-icon {
+                position: absolute;
+                left: 1rem;
+                top: 50%;
+                transform: translateY(-50%);
+                color: var(--gray-400);
+            }
+            .search-input {
+                width: 100%;
+                padding: 0.75rem 1rem 0.75rem 2.5rem;
+                border: 1px solid var(--gray-200);
+                border-radius: 6px;
+                font-size: 1rem;
+                transition: all 0.2s;
+            }
+            .search-input:focus {
+                outline: none;
+                border-color: var(--primary-color);
+                box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.1);
+            }
+            .search-filters {
+                display: flex;
+                align-items: center;
+                gap: 1rem;
+                flex-wrap: wrap;
+            }
+            .filter-group {
+                display: flex;
+                align-items: center;
+                gap: 0.75rem;
+            }
+            .filter-label {
+                font-size: 0.875rem;
+                font-weight: 500;
+                color: var(--gray-600);
+                white-space: nowrap;
+            }
+            .filter-inputs {
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+            }
+            .filter-separator {
+                color: var(--gray-400);
+            }
+            .filter-inputs input {
+                width: 80px;
+            }
+            .btn-search {
+                padding: 0.5rem 1.5rem;
+            }
+            .btn-clear {
+                padding: 0.5rem 1rem;
+            }
+            @media (min-width: 768px) {
+                .search-group {
+                    flex-direction: row;
+                }
+            }
+            </style>
 
             <!-- Patients List -->
-            <div class="card">
-                <div class="card-header">
-                    <h5 style="margin: 0;">
-                        <i class="fas fa-list"></i>
-                        Patient Records (<?php echo count($patients); ?>)
-                    </h5>
+            <div class="patients-container">
+                <div class="patients-header">
+                    <div class="patients-title">
+                        <h5>
+                            <i class="fas fa-users"></i>
+                            Patient Records
+                        </h5>
+                        <span class="patients-count"><?php echo count($patients); ?> patients</span>
+                    </div>
                 </div>
-                <div class="card-body">
+                
+                <div class="patients-content">
                     <?php if (empty($patients)): ?>
-                        <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
-                            <i class="fas fa-user-times" style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.5;"></i>
+                        <div class="empty-state">
+                            <i class="fas fa-user-times"></i>
                             <h5>No patients found</h5>
                             <p>No patients match your search criteria or you haven't treated any patients yet.</p>
                         </div>
                     <?php else: ?>
                         <div class="table-responsive">
-                            <table class="table table-hover">
+                            <table class="table">
                                 <thead>
                                     <tr>
                                         <th>Patient</th>
                                         <th>Age</th>
-                                        <th>Contact</th>
+                                        <th>Contact Information</th>
                                         <th>First Visit</th>
                                         <th>Last Visit</th>
-                                        <th>Appointments</th>
-                                        <th>Completed</th>
+                                        <th>History</th>
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
@@ -213,60 +259,63 @@ function renderPageContent() {
                                     <?php foreach ($patients as $patient): ?>
                                         <tr>
                                             <td>
-                                                <div style="font-weight: 600;"><?php echo htmlspecialchars($patient['first_name'] . ' ' . $patient['last_name']); ?></div>
-                                                <div style="font-size: 0.875rem; color: var(--text-muted);">
-                                                    ID: #<?php echo $patient['id']; ?>
+                                                <div class="patient-name">
+                                                    <?php echo htmlspecialchars($patient['first_name'] . ' ' . $patient['last_name']); ?>
+                                                    <span class="patient-id">#<?php echo $patient['id']; ?></span>
                                                 </div>
                                             </td>
-                                            <td>
-                                                <span class="badge badge-secondary"><?php echo $patient['age'] ?? 'N/A'; ?></span>
+                                           </td>                            <td>
+                                                <span ><?php echo $patient['calculated_age'] ?? 'N/A'; ?> years</span>
                                             </td>
                                             <td>
-                                                <div style="font-size: 0.875rem;">
+                                                <div class="contact-info">
                                                     <?php if ($patient['phone']): ?>
-                                                        <div><i class="fas fa-phone"></i> <?php echo htmlspecialchars($patient['phone']); ?></div>
+                                                        <div class="contact-item">
+                                                            <i class="fas fa-phone"></i>
+                                                            <?php echo htmlspecialchars($patient['phone']); ?>
+                                                        </div>
                                                     <?php endif; ?>
                                                     <?php if ($patient['email']): ?>
-                                                        <div><i class="fas fa-envelope"></i> <?php echo htmlspecialchars($patient['email']); ?></div>
+                                                        <div class="contact-item">
+                                                            <i class="fas fa-envelope"></i>
+                                                            <?php echo htmlspecialchars($patient['email']); ?>
+                                                        </div>
                                                     <?php endif; ?>
                                                 </div>
                                             </td>
                                             <td>
-                                                <div style="font-size: 0.875rem;">
+                                                <div class="date-info">
+                                                    <i class="fas fa-calendar"></i>
                                                     <?php echo formatDate($patient['first_appointment_date']); ?>
                                                 </div>
                                             </td>
                                             <td>
-                                                <div style="font-size: 0.875rem;">
+                                                <div class="date-info">
+                                                    <i class="fas fa-calendar-check"></i>
                                                     <?php echo formatDate($patient['last_appointment_date']); ?>
                                                 </div>
                                             </td>
                                             <td>
-                                                <div class="text-center">
-                                                    <div style="font-weight: 600; font-size: 1.2rem;"><?php echo $patient['appointment_count']; ?></div>
-                                                    <div style="font-size: 0.875rem; color: var(--text-muted);">total</div>
+                                                <div class="appointment-stats">
+                                                    <span class="total-appointments" title="Total Appointments">
+                                                        <i class="fas fa-calendar-alt"></i> <?php echo $patient['appointment_count']; ?>
+                                                    </span>
+                                                    <span class="completed-appointments" title="Completed Appointments">
+                                                        <i class="fas fa-check-circle"></i> <?php echo $patient['completed_appointments']; ?>
+                                                    </span>
                                                 </div>
                                             </td>
                                             <td>
-                                                <div class="text-center">
-                                                    <div style="font-weight: 600; color: var(--success-color); font-size: 1.2rem;"><?php echo $patient['completed_appointments']; ?></div>
-                                                    <div style="font-size: 0.875rem; color: var(--text-muted);">done</div>
-                                                </div>
-                                            </td>
-                                            <td>
-                                                <div class="btn-group">
-                                                    <button onclick="viewPatientDetails(<?php echo $patient['id']; ?>)" 
-                                                            class="btn btn-sm btn-outline-primary" title="View Details">
-                                                        <i class="fas fa-eye"></i>
-                                                    </button>
-                                                    <button onclick="viewTreatmentHistory(<?php echo $patient['id']; ?>)" 
-                                                            class="btn btn-sm btn-outline-info" title="Treatment History">
+                                                <div class="action-buttons">
+                                                    <a href="view_patient.php?id=<?php echo $patient['id']; ?>" 
+                                                       class="btn btn-sm btn-outline-primary" title="View Details">
+                                                        <i class="fas fa-eye"></i></i>
+                                                    </a>
+                                                    <a href="view_appointment_history.php?id=<?php echo $patient['id']; ?>" 
+                                                       class="btn btn-icon btn-info" 
+                                                       title="View Appointment History">
                                                         <i class="fas fa-history"></i>
-                                                    </button>
-                                                    <button onclick="addTreatmentNote(<?php echo $patient['id']; ?>)" 
-                                                            class="btn btn-sm btn-outline-success" title="Add Note">
-                                                        <i class="fas fa-notes-medical"></i>
-                                                    </button>
+                                                    </a>
                                                 </div>
                                             </td>
                                         </tr>
@@ -278,68 +327,147 @@ function renderPageContent() {
                 </div>
             </div>
 
-    <!-- Treatment Notes Modal -->
-    <div class="modal fade" id="notesModal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Add Treatment Note</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <form method="POST" id="notesForm">
-                    <div class="modal-body">
-                        <input type="hidden" name="action" value="add_note">
-                        <input type="hidden" name="patient_id" id="notesPatientId">
-                        
-                        <div class="mb-3">
-                            <label class="form-label">Patient</label>
-                            <input type="text" id="notesPatientName" class="form-control" readonly>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label class="form-label">Treatment Notes</label>
-                            <textarea name="notes" class="form-control" rows="5" placeholder="Enter treatment notes, observations, or recommendations..." required></textarea>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label class="form-label">Next Appointment Recommendation</label>
-                            <textarea name="next_appointment" class="form-control" rows="2" placeholder="Recommended follow-up or next steps..."></textarea>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-success">Save Note</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        function viewPatientDetails(patientId) {
-            // Placeholder for patient details modal
-            alert('Patient details view will be implemented here. ID: ' + patientId);
-        }
-
-        function viewTreatmentHistory(patientId) {
-            // Placeholder for treatment history view
-            alert('Treatment history view will be implemented here. ID: ' + patientId);
-        }
-
-        function addTreatmentNote(patientId) {
-            document.getElementById('notesPatientId').value = patientId;
-            // In a real implementation, you would fetch patient name via AJAX
-            document.getElementById('notesPatientName').value = 'Patient #' + patientId;
-            new bootstrap.Modal(document.getElementById('notesModal')).show();
-        }
-
-        // Add badge styles
-        const style = document.createElement('style');
-        style.textContent = `
-            .badge-secondary { background-color: var(--gray-500); }
-        `;
-        document.head.appendChild(style);
-    </script>
+            <style>
+            .patients-container {
+                background: var(--white);
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            }
+            .patients-header {
+                padding: 1.25rem;
+                border-bottom: 1px solid var(--gray-200);
+            }
+            .patients-title {
+                display: flex;
+                align-items: center;
+                gap: 1rem;
+            }
+            .patients-title h5 {
+                margin: 0;
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+                font-size: 1.1rem;
+            }
+            .patients-count {
+                font-size: 0.875rem;
+                color: var(--gray-500);
+                padding: 0.25rem 0.75rem;
+                background: var(--gray-100);
+                border-radius: 1rem;
+            }
+            .patients-content {
+                padding: 1rem;
+            }
+            .empty-state {
+                text-align: center;
+                padding: 3rem 1rem;
+                color: var(--gray-500);
+            }
+            .empty-state i {
+                font-size: 3rem;
+                margin-bottom: 1rem;
+                opacity: 0.5;
+            }
+            .empty-state h5 {
+                margin-bottom: 0.5rem;
+                color: var(--gray-700);
+            }
+            .empty-state p {
+                margin: 0;
+                font-size: 0.875rem;
+            }
+            .table {
+                margin: 0;
+            }
+            .table th {
+                font-size: 0.875rem;
+                font-weight: 600;
+                color: var(--gray-600);
+                border-bottom-width: 1px;
+                padding: 0.75rem;
+            }
+            .table td {
+                padding: 1rem 0.75rem;
+                vertical-align: middle;
+            }
+            .patient-name {
+                font-weight: 600;
+                color: var(--gray-800);
+            }
+            .patient-id {
+                font-size: 0.75rem;
+                color: var(--gray-500);
+                margin-left: 0.5rem;
+            }
+            .age-badge {
+                display: inline-block;
+                padding: 0.25rem 0.75rem;
+                font-size: 0.75rem;
+                font-weight: 600;
+                color: var(--gray-700);
+                background: var(--gray-100);
+                border-radius: 1rem;
+            }
+            .contact-info {
+                font-size: 0.875rem;
+            }
+            .contact-item {
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+                color: var(--gray-600);
+            }
+            .contact-item i {
+                color: var(--gray-400);
+            }
+            .date-info {
+                font-size: 0.875rem;
+                color: var(--gray-600);
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+            }
+            .date-info i {
+                color: var(--gray-400);
+            }
+            .appointment-stats {
+                display: flex;
+                gap: 1rem;
+                font-size: 0.875rem;
+            }
+            .total-appointments, .completed-appointments {
+                display: flex;
+                align-items: center;
+                gap: 0.375rem;
+            }
+            .total-appointments i {
+                color: var(--primary-color);
+            }
+            .completed-appointments i {
+                color: var(--success-color);
+            }
+            .action-buttons {
+                display: flex;
+                gap: 0.5rem;
+            }
+            .btn-icon {
+                width: 32px;
+                height: 32px;
+                padding: 0;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: 6px;
+                transition: all 0.2s;
+            }
+            .btn-icon:hover {
+                transform: translateY(-1px);
+            }
+            .btn-icon i {
+                font-size: 0.875rem;
+            }
+            </style>
 <?php
 }
 

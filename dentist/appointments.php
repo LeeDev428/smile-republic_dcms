@@ -16,8 +16,9 @@ if ($_POST && isset($_POST['action'])) {
     
     if ($action === 'update_status') {
         $new_status = $_POST['status'];
-        $notes = sanitize($_POST['notes'] ?? '');
-        $valid_statuses = ['confirmed', 'in_progress', 'completed', 'cancelled'];
+        // Accept spaces and line breaks in notes
+        $notes = isset($_POST['notes']) ? trim(str_replace(["\r\n", "\r", "\n"], "\n", $_POST['notes'])) : '';
+        $valid_statuses = ['scheduled', 'completed', 'cancelled'];
         
         if (in_array($new_status, $valid_statuses)) {
             try {
@@ -44,27 +45,40 @@ $status_filter = $_GET['status'] ?? '';
 $date_filter = $_GET['date'] ?? '';
 
 // Build query with filters
-$where_conditions = ["a.dentist_id = ?"];
-$params = [$_SESSION['user_id']];
+$where_conditions = ["a.dentist_id = :dentist_id"];
+$params = [':dentist_id' => $_SESSION['user_id']];
 
 if ($status_filter) {
-    $where_conditions[] = "a.status = ?";
-    $params[] = $status_filter;
+    $where_conditions[] = "a.status = :status";
+    $params[':status'] = $status_filter;
 }
 
 if ($date_filter) {
-    $where_conditions[] = "a.appointment_date = ?";
-    $params[] = $date_filter;
+    $where_conditions[] = "a.appointment_date = :date";
+    $params[':date'] = $date_filter;
 }
 
 $where_clause = 'WHERE ' . implode(' AND ', $where_conditions);
-
-// Get appointments for this dentist
 try {
+    $count_stmt = $pdo->prepare("
+        SELECT COUNT(*) as total
+        FROM appointments a
+        JOIN patients p ON a.patient_id = p.id
+        JOIN dental_operations do ON a.operation_id = do.id
+        $where_clause
+    ");
+    $count_stmt->execute($params);
+    $total_records = $count_stmt->fetch()['total'];
+    
+    // Get paginated appointments
+    $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
+    $per_page = 10;
+    $offset = ($page - 1) * $per_page;
+    
     $stmt = $pdo->prepare("
         SELECT a.*, 
                p.first_name as patient_first, p.last_name as patient_last, 
-               p.phone as patient_phone, p.date_of_birth, p.medical_history, p.allergies,
+               p.phone as patient_phone, p.date_of_birth,
                do.name as operation_name, do.duration_minutes,
                fd.first_name as frontdesk_first, fd.last_name as frontdesk_last
         FROM appointments a
@@ -73,8 +87,17 @@ try {
         LEFT JOIN users fd ON a.frontdesk_id = fd.id
         $where_clause
         ORDER BY a.appointment_date ASC, a.appointment_time ASC
+        LIMIT :per_page OFFSET :offset
     ");
-    $stmt->execute($params);
+    
+    // Execute with all parameters
+    foreach ($params as $key => $value) {
+        $stmt->bindValue($key, $value);
+    }
+    $stmt->bindValue(':per_page', $per_page, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+    
+    $stmt->execute();
     $appointments = $stmt->fetchAll();
     
     // Get appointment statistics for this dentist
@@ -99,7 +122,7 @@ try {
 }
 
 function renderPageContent() {
-    global $message, $error, $appointments, $stats, $status_filter, $date_filter;
+    global $message, $error, $appointments, $stats, $status_filter, $date_filter, $total_records;
 ?>
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <div>
@@ -265,11 +288,6 @@ function renderPageContent() {
                                                 <div style="font-weight: 600;">
                                                     <?php echo htmlspecialchars($appointment['operation_name']); ?>
                                                 </div>
-                                                <?php if ($appointment['medical_history'] || $appointment['allergies']): ?>
-                                                    <div style="font-size: 0.875rem; color: var(--danger-color); margin-top: 0.25rem;">
-                                                        <i class="fas fa-exclamation-triangle"></i> Medical Alert
-                                                    </div>
-                                                <?php endif; ?>
                                             </td>
                                             <td>
                                                 <span class="badge badge-<?php 
@@ -288,7 +306,7 @@ function renderPageContent() {
                                             </td>
                                             <td>
                                                 <?php if ($appointment['notes']): ?>
-                                                    <div style="max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" 
+                                                    <div style="max-width: 100px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" 
                                                          title="<?php echo htmlspecialchars($appointment['notes']); ?>">
                                                         <?php echo htmlspecialchars($appointment['notes']); ?>
                                                     </div>
@@ -297,14 +315,13 @@ function renderPageContent() {
                                                 <?php endif; ?>
                                             </td>
                                             <td>
-                                                <div class="d-flex gap-1">
-                                                    <?php if (in_array($appointment['status'], ['scheduled', 'confirmed', 'in_progress'])): ?>
-                                                        <button class="btn btn-sm btn-primary" onclick="showStatusModal(<?php echo $appointment['id']; ?>, '<?php echo $appointment['status']; ?>', '<?php echo htmlspecialchars($appointment['notes']); ?>')">
-                                                            <i class="fas fa-edit"></i>
-                                                        </button>
-                                                    <?php endif; ?>
-                                                    <button class="btn btn-sm btn-secondary" onclick="viewPatientDetails(<?php echo $appointment['patient_id']; ?>)">
-                                                        <i class="fas fa-user"></i>
+                                                <div style="display: flex; gap: 0.5rem;"></div>
+<button style="background: none; border: none; padding: 0.25rem 0.5rem; color: #222; cursor: pointer;"
+    onclick="showStatusModal(<?php echo $appointment['id']; ?>, '<?php echo $appointment['status']; ?>', '<?php echo addslashes(str_replace(array("\r", "\n", "'", "\\"), array(' ', ' ', "\\'", "\\\\"), $appointment['notes'])); ?>')">
+    <i class="fas fa-edit" style="color: #222;"></i>
+</button>
+                                                    <button style="background: none; border: none; padding: 0.25rem 0.5rem; color: #222; cursor: pointer;" onclick="viewPatientDetails(<?php echo $appointment['patient_id']; ?>)">
+                                                        <i class="fas fa-eye" style="color: #222;"></i>
                                                     </button>
                                                 </div>
                                             </td>
@@ -312,7 +329,18 @@ function renderPageContent() {
                                     <?php endforeach; ?>
                                 </tbody>
                             </table>
+                            <div id="loading" style="display: none; text-align: center; padding: 20px;">
+                                <i class="fas fa-spinner fa-spin"></i> Loading more appointments...
+                            </div>
                         </div>
+                        
+                        <?php if ($total_records > count($appointments)): ?>
+                            <div id="loadMore" style="text-align: center; padding: 20px;">
+                                <button class="btn btn-secondary" onclick="loadMoreAppointments()">
+                                    <i class="fas fa-sync"></i> Load More
+                                </button>
+                            </div>
+                        <?php endif; ?>
                     <?php endif; ?>
                 </div>
             </div>
@@ -322,29 +350,25 @@ function renderPageContent() {
         <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--white); border-radius: var(--border-radius-lg); padding: 2rem; width: 90%; max-width: 500px;">
             <h3 style="margin-bottom: 1.5rem;">Update Appointment Status</h3>
             
-            <form method="POST" id="statusForm">
+            <form id="statusForm" autocomplete="off">
                 <input type="hidden" name="action" value="update_status">
                 <input type="hidden" name="appointment_id" id="modalAppointmentId">
-                
                 <div class="form-group">
                     <label for="modalStatus" class="form-label">Status</label>
                     <select name="status" id="modalStatus" class="form-control form-select" required>
-                        <option value="confirmed">Confirmed</option>
-                        <option value="in_progress">In Progress</option>
+                        <option value="scheduled">Scheduled</option>
                         <option value="completed">Completed</option>
                         <option value="cancelled">Cancelled</option>
                     </select>
                 </div>
-                
                 <div class="form-group">
                     <label for="modalNotes" class="form-label">Treatment Notes</label>
-                    <textarea name="notes" id="modalNotes" class="form-control" rows="4" 
+                    <textarea name="notes" id="modalNotes" class="form-control" rows="15" 
                               placeholder="Add treatment notes, observations, or next steps..."></textarea>
                 </div>
-                
                 <div style="display: flex; gap: 1rem; justify-content: flex-end; margin-top: 2rem;">
                     <button type="button" onclick="closeStatusModal()" class="btn btn-secondary">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Update Status</button>
+                    <button type="submit" class="btn btn-primary" id="updateStatusBtn">Update Status</button>
                 </div>
             </form>
         </div>
@@ -366,11 +390,158 @@ function renderPageContent() {
         </div>
     </div>
 
+    <!-- Floating Success Message -->
+    <div id="floatingSuccess" style="display:none;position:fixed;top:2rem;right:2rem;z-index:2000;min-width:220px;max-width:350px;">
+        <div class="alert alert-success" style="box-shadow:0 2px 8px rgba(0,0,0,0.15);">
+            <i class="fas fa-check-circle"></i> <span id="floatingSuccessMsg"></span>
+        </div>
+    </div>
     <script>
+        let currentPage = 1;
+        let isLoading = false;
+
+        function loadMoreAppointments() {
+            if (isLoading) return;
+            isLoading = true;
+            currentPage++;
+
+            const loading = document.getElementById('loading');
+            const loadMore = document.getElementById('loadMore');
+            loading.style.display = 'block';
+            loadMore.style.display = 'none';
+
+            // Get current filter values
+            const status = document.getElementById('status').value;
+            const date = document.getElementById('date').value;
+
+            // Fetch more appointments
+            fetch(`appointments.php?page=${currentPage}&status=${status}&date=${date}&ajax=1`)
+                .then(response => response.json())
+                .then(data => {
+                    const tbody = document.querySelector('table tbody');
+                    
+                    data.appointments.forEach(appointment => {
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `
+                            <td>
+                                <div style="font-weight: 600;">
+                                    ${formatDate(appointment.appointment_date)}
+                                </div>
+                                <div style="font-size: 0.875rem; color: var(--text-muted);">
+                                    ${formatTime(appointment.appointment_time)}
+                                    (${appointment.duration_minutes} min)
+                                </div>
+                            </td>
+                            <td>
+                                <div style="font-weight: 600;">
+                                    ${escapeHtml(appointment.patient_first + ' ' + appointment.patient_last)}
+                                </div>
+                                <div style="font-size: 0.875rem; color: var(--text-muted);">
+                                    <i class="fas fa-phone"></i> ${escapeHtml(appointment.patient_phone)}
+                                </div>
+                            </td>
+                            <td>
+                                <div style="font-weight: 600;">
+                                    ${escapeHtml(appointment.operation_name)}
+                                </div>
+                            </td>
+                            <td>
+                                <span class="badge badge-${getStatusClass(appointment.status)}">
+                                    ${ucFirst(appointment.status.replace('_', ' '))}
+                                </span>
+                            </td>
+                            <td>
+                                <strong>${formatCurrency(appointment.total_cost)}</strong>
+                            </td>
+                            <td>
+                                ${appointment.notes ? 
+                                    `<div style="max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" 
+                                          title="${escapeHtml(appointment.notes)}">
+                                        ${escapeHtml(appointment.notes)}
+                                    </div>` : 
+                                    '<span style="color: var(--text-muted);">No notes</span>'}
+                            </td>
+                            <td>
+                                <div class="d-flex gap-1">
+                                    ${['scheduled', 'confirmed', 'in_progress'].includes(appointment.status) ?
+                                        `<button class="btn btn-sm btn-primary" onclick="showStatusModal(${appointment.id}, '${appointment.status}', '${escapeHtml(appointment.notes || '')}')">
+                                            <i class="fas fa-edit"></i>
+                                        </button>` : ''}
+                                    <button class="btn btn-sm btn-secondary" onclick="viewPatientDetails(${appointment.patient_id})">
+                                        <i class="fas fa-user"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+
+                    loading.style.display = 'none';
+                    if (data.hasMore) {
+                        loadMore.style.display = 'block';
+                    }
+                    isLoading = false;
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    loading.style.display = 'none';
+                    loadMore.style.display = 'block';
+                    isLoading = false;
+                });
+        }
+
+        function escapeHtml(unsafe) {
+            return unsafe
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        function formatDate(date) {
+            return new Date(date).toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+        }
+
+        function formatTime(time) {
+            return new Date('2000-01-01T' + time).toLocaleTimeString('en-US', {
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: true
+            });
+        }
+
+        function ucFirst(string) {
+            return string.charAt(0).toUpperCase() + string.slice(1);
+        }
+
+        function getStatusClass(status) {
+            return {
+                'completed': 'success',
+                'cancelled': 'danger',
+                'no_show': 'danger',
+                'in_progress': 'warning',
+            }[status] || 'primary';
+        }
+
         function showStatusModal(appointmentId, currentStatus, currentNotes) {
             document.getElementById('modalAppointmentId').value = appointmentId;
-            document.getElementById('modalStatus').value = currentStatus;
-            document.getElementById('modalNotes').value = currentNotes || '';
+            // Set status dropdown to current status
+            var statusSelect = document.getElementById('modalStatus');
+            for (var i = 0; i < statusSelect.options.length; i++) {
+                if (statusSelect.options[i].value === currentStatus) {
+                    statusSelect.selectedIndex = i;
+                    break;
+                }
+            }
+            var notesField = document.getElementById('modalNotes');
+            notesField.value = currentNotes || '';
+            notesField.readOnly = false;
+            notesField.disabled = false;
             document.getElementById('statusModal').style.display = 'block';
             document.body.style.overflow = 'hidden';
         }
@@ -380,9 +551,111 @@ function renderPageContent() {
             document.body.style.overflow = 'auto';
         }
 
+        // AJAX status update
+        document.getElementById('statusForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            var btn = document.getElementById('updateStatusBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating...';
+            var formData = new FormData(this);
+            fetch('appointments.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.text())
+            .then(html => {
+                // Try to parse success message from HTML
+                let msg = 'Appointment status updated successfully.';
+                if (html.includes('Appointment status updated successfully.')) {
+                    showFloatingSuccess(msg);
+                } else {
+                    msg = 'Failed to update appointment.';
+                }
+                // Update table row (status and notes)
+                var id = document.getElementById('modalAppointmentId').value;
+                var status = document.getElementById('modalStatus').value;
+                var notes = document.getElementById('modalNotes').value;
+                var row = document.querySelector('tr td input[value="' + id + '"]');
+                if (!row) {
+                    // fallback: find by data-id attribute if you add it
+                }
+                // Instead, update by traversing table rows
+                var trs = document.querySelectorAll('table tbody tr');
+                trs.forEach(function(tr) {
+                    if (tr.innerHTML.includes('showStatusModal(' + id + ',')) {
+                        // Update status badge
+                        var statusCell = tr.querySelector('span.badge');
+                        if (statusCell) {
+                            statusCell.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+                            statusCell.className = 'badge badge-' + getStatusClass(status);
+                        }
+                        // Update notes
+                        var notesCell = tr.querySelector('td:nth-child(6) div, td:nth-child(6) span');
+                        if (notesCell) {
+                            if (notes) {
+                                notesCell.textContent = notes;
+                                notesCell.title = notes;
+                                notesCell.style.color = '';
+                            } else {
+                                notesCell.textContent = 'No notes';
+                                notesCell.title = '';
+                                notesCell.style.color = 'var(--text-muted)';
+                            }
+                        }
+                        // Get patient ID reliably
+                        var patientId = null;
+                        // Try to get from existing button, else fallback to data attribute
+                        var viewBtn = tr.querySelector('button[onclick^=viewPatientDetails]');
+                        if (viewBtn) {
+                            var match = viewBtn.getAttribute('onclick').match(/viewPatientDetails\((\d+)\)/);
+                            if (match) patientId = match[1];
+                        }
+                        if (!patientId) {
+                            // Try to get from a data attribute if you add it in PHP
+                            patientId = tr.getAttribute('data-patient-id') || '';
+                        }
+                        // Escape notes for JS string
+                        function escapeForJs(str) {
+                            return String(str || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r?\n/g, '\\n').replace(/"/g, '\\"');
+                        }
+                        var actionsCell = tr.querySelector('td:nth-child(7)');
+                        if (actionsCell) {
+                            actionsCell.innerHTML = `
+                                <div style="display: flex; gap: 0.5rem;">
+                                    <button style="background: none; border: none; padding: 0.25rem 0.5rem; color: #222; cursor: pointer;" onclick="showStatusModal(${id}, '${status}', '${escapeForJs(notes)}')">
+                                        <i class='fas fa-edit' style='color: #222;'></i>
+                                    </button>
+                                    <button style="background: none; border: none; padding: 0.25rem 0.5rem; color: #222; cursor: pointer;" onclick="viewPatientDetails(${patientId})">
+                                        <i class='fas fa-eye' style='color: #222;'></i>
+                                    </button>
+                                </div>
+                            `;
+                        }
+                    }
+                });
+                closeStatusModal();
+                btn.disabled = false;
+                btn.innerHTML = 'Update Status';
+            })
+            .catch(function() {
+                showFloatingSuccess('Failed to update appointment.');
+                btn.disabled = false;
+                btn.innerHTML = 'Update Status';
+            });
+        });
+
+        function showFloatingSuccess(msg) {
+            var box = document.getElementById('floatingSuccess');
+            var msgSpan = document.getElementById('floatingSuccessMsg');
+            msgSpan.textContent = msg;
+            box.style.display = 'block';
+            setTimeout(function() {
+                box.style.display = 'none';
+            }, 3000);
+        }
+
         function viewPatientDetails(patientId) {
-            // For now, show a simple alert. In a real implementation, you'd load patient details via AJAX
-            alert('Patient details feature - Patient ID: ' + patientId + '\n\nThis would show full patient medical history, previous treatments, allergies, etc.');
+            window.location.href = 'view_patient_appointments.php?id=' + encodeURIComponent(patientId);
         }
 
         function closePatientModal() {
@@ -425,11 +698,34 @@ function renderPageContent() {
             .badge-secondary { background-color: var(--gray-500); }
             
             .row { display: flex; flex-wrap: wrap; margin: -0.75rem; }
-            .col-md-4 { flex: 0 0 33.333333%; max-width: 33.333333%; padding: 0.75rem; }
+            .col-md-4, .col-md-6 { flex: 0 0 33.333333%; max-width: 33.333333%; padding: 0.75rem; }
+            .col-md-6 { flex: 0 0 50%; max-width: 50%; }
+            .col-md-12 { flex: 0 0 100%; max-width: 100%; padding: 0.75rem; }
             .g-3 > * { margin-bottom: 1rem; }
             .d-flex { display: flex; }
             .align-items-end { align-items: flex-end; }
             .me-2 { margin-right: 0.5rem; }
+            .mb-3 { margin-bottom: 1rem; }
+            .mb-4 { margin-bottom: 1.5rem; }
+            .p-4 { padding: 1.5rem; }
+            .mt-2 { margin-top: 0.5rem; }
+            .text-center { text-align: center; }
+            
+            .patient-info h4 {
+                color: var(--primary-color);
+                padding-bottom: 0.5rem;
+                border-bottom: 1px solid var(--border-color);
+                margin-bottom: 1rem;
+            }
+            
+            .patient-info p {
+                margin-bottom: 0.5rem;
+                line-height: 1.5;
+            }
+            
+            .patient-info strong {
+                color: var(--gray-700);
+            }
         `;
         document.head.appendChild(style);
     </script>
